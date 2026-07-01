@@ -1,0 +1,31 @@
+[
+  {
+    "name": "iCloud+ 200GB",
+    "sources": ["paypay"],
+    "match": {
+      "shop": "Appleサービス",
+      "jpy_amount": -450
+    },
+    "set": {
+      "type": "지출",
+      "major": "고정지출",
+      "minor": "구독",
+      "category": "그 외",
+      "item": "iCloud+ 200GB"
+    }
+  },
+  {
+    "name": "도시가스",
+    "sources": ["paypay"],
+    "match": {
+      "shop": "東京ガス"
+    },
+    "set": {
+      "type": "지출",
+      "major": "고정지출",
+      "minor": "공과금_통신비",
+      "category": "가스",
+      "item": "도시가스"
+    }
+  }
+]

@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="ko" data-bs-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <title>Kakeibo</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+</head>
+<body>
+
+<nav class="navbar navbar-dark bg-dark border-bottom border-secondary px-3">
+  <a class="navbar-brand fw-bold text-warning" href="/">Kakeibo</a>
+  <div class="d-flex gap-3">
+    <a class="nav-link {% if request.endpoint=='transactions' %}text-white fw-bold{% else %}text-secondary{% endif %}" href="{{ url_for('transactions') }}">내역</a>
+    <a class="nav-link {% if request.endpoint=='uncategorized' %}text-white fw-bold{% else %}text-secondary{% endif %}" href="{{ url_for('uncategorized') }}">
+      미분류
+      <span id="uncategorized-badge" class="badge bg-danger ms-1" style="display:none"></span>
+    </a>
+    <a class="nav-link {% if request.endpoint=='stats' %}text-white fw-bold{% else %}text-secondary{% endif %}" href="{{ url_for('stats') }}">통계</a>
+    <a class="nav-link {% if request.endpoint=='budget' %}text-white fw-bold{% else %}text-secondary{% endif %}" href="{{ url_for('budget') }}">예산</a>
+    <a class="nav-link {% if request.endpoint=='settings' %}text-white fw-bold{% else %}text-secondary{% endif %}" href="{{ url_for('settings') }}">설정</a>
+    <a class="nav-link {% if request.endpoint=='trash' %}text-white fw-bold{% else %}text-secondary{% endif %}" href="{{ url_for('trash') }}"><i class="bi bi-trash3"></i></a>
+  </div>
+</nav>
+
+<main class="container-fluid py-3 px-4">
+  {% block content %}{% endblock %}
+</main>
+
+<!-- Receipt image zoom lightbox (shared across all pages) -->
+<div id="receipt-lightbox" onclick="hideReceipt()"
+     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:2000;
+            align-items:center;justify-content:center;cursor:zoom-out;padding:24px">
+  <img id="receipt-lightbox-img" src=""
+       style="max-width:96%;max-height:96%;border-radius:6px;box-shadow:0 0 40px #000">
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+<script>
+function showReceipt(src) {
+  document.getElementById('receipt-lightbox-img').src = src;
+  document.getElementById('receipt-lightbox').style.display = 'flex';
+}
+function hideReceipt() {
+  document.getElementById('receipt-lightbox').style.display = 'none';
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape') hideReceipt(); });
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

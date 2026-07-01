@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h5 class="mb-0">미분류 내역 <span class="badge bg-danger">{{ txs|length }}</span></h5>
+</div>
+
+{% if txs %}
+<table class="table table-dark table-hover table-sm">
+  <thead class="text-secondary">
+    <tr>
+      <th>날짜</th><th>소스</th><th>구입처</th><th>품목</th><th class="text-end">금액</th>
+      <th>대분류</th><th>소분류</th><th>카테고리</th><th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for t in txs %}
+    <tr id="uncat-{{ t.id }}">
+      <td class="text-secondary small">{{ t.date }}</td>
+      <td><span class="badge bg-secondary small">{{ t.source }}</span></td>
+      <td class="small">{{ t.shop or '' }}</td>
+      <td class="small">{{ t.item or '' }}</td>
+      <td class="text-end text-danger small">{{ "¥{:,.0f}".format(t.jpy_amount or 0) }}</td>
+      <td>
+        <select class="form-select form-select-sm bg-dark text-white border-secondary" style="min-width:100px"
+                id="major-{{ t.id }}" onchange="loadMinorForRow({{ t.id }})">
+          <option value=""></option>
+          {% for m in categories|map(attribute='major')|unique %}
+          <option>{{ m }}</option>
+          {% endfor %}
+        </select>
+      </td>
+      <td>
+        <select class="form-select form-select-sm bg-dark text-white border-secondary" style="min-width:90px"
+                id="minor-{{ t.id }}" onchange="loadSubForRow({{ t.id }})">
+          <option value=""></option>
+        </select>
+      </td>
+      <td>
+        <select class="form-select form-select-sm bg-dark text-white border-secondary" style="min-width:90px"
+                id="sub-{{ t.id }}">
+          <option value=""></option>
+        </select>
+      </td>
+      <td>
+        <button class="btn btn-sm btn-outline-primary" onclick="saveCategory({{ t.id }})">저장</button>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+  <div class="text-center text-secondary py-5">미분류 내역이 없습니다. 👍</div>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const allCats = {{ categories|tojson }};
+
+function loadMinorForRow(id) {
+  const major  = document.getElementById(`major-${id}`).value;
+  const minors = [...new Set(allCats.filter(c => c.major===major).map(c => c.minor))];
+  const sel    = document.getElementById(`minor-${id}`);
+  sel.innerHTML = '<option value=""></option>' + minors.map(m => `<option>${m}</option>`).join('');
+  loadSubForRow(id);
+}
+
+function loadSubForRow(id) {
+  const major = document.getElementById(`major-${id}`).value;
+  const minor = document.getElementById(`minor-${id}`).value;
+  const subs  = allCats.filter(c => c.major===major && c.minor===minor).map(c => c.sub);
+  document.getElementById(`sub-${id}`).innerHTML =
+    '<option value=""></option>' + subs.map(s => `<option>${s}</option>`).join('');
+}
+
+async function saveCategory(id) {
+  const major    = document.getElementById(`major-${id}`).value;
+  const minor    = document.getElementById(`minor-${id}`).value;
+  const category = document.getElementById(`sub-${id}`).value;
+  if (!major) { alert('대분류는 선택해줘'); return; }
+
+  // Fetch the existing transaction data, then PUT with only the category overwritten
+  const tx = await fetch(`/api/transactions/${id}`).then(r => r.json());
+  const body = { ...tx, major, minor, category };
+  const res = await fetch(`/api/transactions/${id}`, {
+    method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(body)
+  });
+  if (res.ok) {
+    document.getElementById(`uncat-${id}`).remove();
+  } else {
+    alert('저장 실패');
+  }
+}
+</script>
+{% endblock %}

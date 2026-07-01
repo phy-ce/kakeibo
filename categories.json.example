@@ -1,0 +1,24 @@
+[
+  { "type": "지출", "major": "고정지출", "minor": "주거",     "sub": "그 외" },
+  { "type": "지출", "major": "고정지출", "minor": "공과금",   "sub": "그 외" },
+  { "type": "지출", "major": "고정지출", "minor": "통신비",   "sub": "그 외" },
+  { "type": "지출", "major": "고정지출", "minor": "구독",     "sub": "그 외" },
+  { "type": "지출", "major": "고정지출", "minor": "보험",     "sub": "그 외" },
+
+  { "type": "지출", "major": "변동지출", "minor": "식비",     "sub": "그 외" },
+  { "type": "지출", "major": "변동지출", "minor": "식비",     "sub": "외식" },
+  { "type": "지출", "major": "변동지출", "minor": "식비",     "sub": "식료품" },
+  { "type": "지출", "major": "변동지출", "minor": "교통",     "sub": "그 외" },
+  { "type": "지출", "major": "변동지출", "minor": "의료",     "sub": "그 외" },
+  { "type": "지출", "major": "변동지출", "minor": "의류",     "sub": "그 외" },
+  { "type": "지출", "major": "변동지출", "minor": "여가",     "sub": "그 외" },
+  { "type": "지출", "major": "변동지출", "minor": "생활용품", "sub": "그 외" },
+  { "type": "지출", "major": "변동지출", "minor": "기타",     "sub": "그 외" },
+
+  { "type": "지출", "major": "저축_투자", "minor": "저축", "sub": "그 외" },
+  { "type": "지출", "major": "저축_투자", "minor": "투자", "sub": "그 외" },
+
+  { "type": "수입", "major": "수입", "minor": "급여",   "sub": "그 외" },
+  { "type": "수입", "major": "수입", "minor": "부수입", "sub": "그 외" },
+  { "type": "수입", "major": "수입", "minor": "기타",   "sub": "그 외" }
+]

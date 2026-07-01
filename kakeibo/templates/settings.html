@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="row g-4">
+
+  <!-- Initial balance -->
+  <div class="col-lg-4">
+    <div class="card bg-dark border-secondary">
+      <div class="card-header border-secondary">잔고 초기값</div>
+      <div class="card-body">
+        <div class="mb-3">
+          <label class="form-label small">엔화 초기 잔고 (¥)</label>
+          <input type="number" id="init-jpy" class="form-control form-control-sm bg-dark text-white border-secondary" value="{{ initial_jpy }}">
+        </div>
+        <div class="mb-3">
+          <label class="form-label small">원화 초기 잔고 (₩)</label>
+          <input type="number" id="init-krw" class="form-control form-control-sm bg-dark text-white border-secondary" value="{{ initial_krw }}">
+        </div>
+        <div class="mb-3">
+          <label class="form-label small">메일 동기화 기간 (일)</label>
+          <input type="number" id="mail-days" class="form-control form-control-sm bg-dark text-white border-secondary"
+                 value="{{ get_setting('mail_sync_days', '30') }}" min="1" max="90">
+          <div class="text-secondary" style="font-size:0.75rem">최근 N일 이내 메일만 가져옵니다</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label small">구매 발신자 화이트리스트</label>
+          <input type="text" id="mail-allow" class="form-control form-control-sm bg-dark text-white border-secondary"
+                 value="{{ get_setting('email_sender_allowlist', '') }}" placeholder="비우면 기본값 사용">
+          <div class="text-secondary" style="font-size:0.75rem">쉼표 구분. 이 발신자는 AI로 바로 분석. <b>채우면 그 값이 그대로 사용(기본 대체), 비우면 기본값</b></div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label small">구매 키워드</label>
+          <input type="text" id="mail-keywords" class="form-control form-control-sm bg-dark text-white border-secondary"
+                 value="{{ get_setting('email_keywords', '') }}" placeholder="비우면 기본값 사용">
+          <div class="text-secondary" style="font-size:0.75rem">쉼표 구분. 메일 검색 + 구매 판정에 사용. <b>채우면 대체, 비우면 기본값</b></div>
+        </div>
+        <div class="d-flex gap-2">
+          <button class="btn btn-primary btn-sm" onclick="saveSettings()">저장</button>
+          <button class="btn btn-outline-secondary btn-sm" onclick="resetMailFilters()" title="발신자·키워드를 기본값으로">기본값으로 되돌리기</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Gmail integration -->
+    <div class="card bg-dark border-secondary mt-4">
+      <div class="card-header border-secondary">Gmail 연동</div>
+      <div class="card-body">
+        <div class="mb-2 small">
+          상태:
+          {% if gmail.has_token %}
+            <span class="badge bg-success">연동됨</span>
+          {% elif gmail.has_credentials %}
+            <span class="badge bg-info text-dark">자격증명 등록됨 (첫 동기화 시 인증)</span>
+          {% else %}
+            <span class="badge bg-warning text-dark">미설정</span>
+          {% endif %}
+        </div>
+        <div class="text-secondary" style="font-size:0.75rem">
+          <a href="https://console.cloud.google.com/apis/credentials" target="_blank" class="link-info">Google Cloud Console</a>
+          에서 <b>OAuth 클라이언트(데스크톱)</b> 을 만들어 다운로드한
+          <code>credentials.json</code> 을 그대로 올리세요.
+        </div>
+        <div class="input-group input-group-sm mt-2">
+          <input type="file" id="gmail-creds" accept=".json,application/json"
+                 class="form-control form-control-sm bg-dark text-white border-secondary">
+          <button class="btn btn-outline-info btn-sm" onclick="uploadGmailCreds()">업로드</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Category management -->
+  <div class="col-lg-8">
+    <div class="card bg-dark border-secondary">
+      <div class="card-header border-secondary d-flex justify-content-between align-items-center">
+        <span>카테고리 관리</span>
+        <button class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#cat-modal">
+          <i class="bi bi-plus"></i> 추가
+        </button>
+      </div>
+      <div class="card-body p-0" style="max-height:500px;overflow-y:auto">
+        <table class="table table-dark table-sm table-hover mb-0">
+          <thead class="text-secondary">
+            <tr><th>구분</th><th>대분류</th><th>소분류</th><th>카테고리</th><th></th></tr>
+          </thead>
+          <tbody>
+            {% for c in categories %}
+            <tr>
+              <td><span class="badge {% if c.type=='지출' %}bg-danger{% else %}bg-success{% endif %}">{{ c.type }}</span></td>
+              <td class="small">{{ c.major }}</td>
+              <td class="small text-secondary">{{ c.minor }}</td>
+              <td class="small text-secondary">{{ c.sub }}</td>
+              <td>
+                <button class="btn btn-link btn-sm p-0 text-danger" onclick="deleteCat({{ c.id }})">
+                  <i class="bi bi-trash"></i>
+                </button>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Category add modal -->
+<div class="modal fade" id="cat-modal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content bg-dark">
+      <div class="modal-header border-secondary">
+        <h5 class="modal-title">카테고리 추가</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-2">
+          <label class="form-label small">구분</label>
+          <select id="c-type" class="form-select form-select-sm bg-dark text-white border-secondary">
+            <option>지출</option><option>수입</option>
+          </select>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">대분류</label>
+          <input type="text" id="c-major" class="form-control form-control-sm bg-dark text-white border-secondary">
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">소분류</label>
+          <input type="text" id="c-minor" class="form-control form-control-sm bg-dark text-white border-secondary">
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">카테고리</label>
+          <input type="text" id="c-sub" class="form-control form-control-sm bg-dark text-white border-secondary">
+        </div>
+      </div>
+      <div class="modal-footer border-secondary">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">취소</button>
+        <button class="btn btn-primary btn-sm" onclick="addCat()">추가</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const MAIL_DEFAULTS = {
+  senders:  {{ default_senders|tojson }},
+  keywords: {{ default_keywords|tojson }},
+};
+
+function saveSettings() {
+  fetch('/api/settings', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      initial_jpy_balance: document.getElementById('init-jpy').value,
+      initial_krw_balance:    document.getElementById('init-krw').value,
+      mail_sync_days:         document.getElementById('mail-days').value,
+      email_sender_allowlist: document.getElementById('mail-allow').value,
+      email_keywords:         document.getElementById('mail-keywords').value,
+    })
+  }).then(() => alert('저장 완료'));
+}
+
+function resetMailFilters() {
+  if (!confirm('발신자·키워드를 기본값으로 되돌릴까요?')) return;
+  document.getElementById('mail-allow').value    = MAIL_DEFAULTS.senders;
+  document.getElementById('mail-keywords').value = MAIL_DEFAULTS.keywords;
+  saveSettings();
+}
+
+function uploadGmailCreds() {
+  const input = document.getElementById('gmail-creds');
+  if (!input.files.length) { alert('credentials.json 파일을 선택하세요'); return; }
+  const fd = new FormData();
+  fd.append('credentials', input.files[0]);
+  fetch('/api/gmail/credentials', {method:'POST', body: fd})
+    .then(r => r.json())
+    .then(d => {
+      alert(d.message || d.error || '완료');
+      if (d.ok) location.reload();
+    })
+    .catch(() => alert('업로드 실패'));
+}
+
+function addCat() {
+  const body = {
+    type:  document.getElementById('c-type').value,
+    major: document.getElementById('c-major').value,
+    minor: document.getElementById('c-minor').value,
+    sub:   document.getElementById('c-sub').value,
+  };
+  fetch('/api/categories', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)})
+    .then(() => location.reload());
+}
+
+function deleteCat(id) {
+  if (!confirm('삭제하시겠습니까?')) return;
+  fetch(`/api/categories/${id}`, {method:'DELETE'}).then(() => location.reload());
+}
+</script>
+{% endblock %}

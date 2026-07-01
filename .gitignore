@@ -1,0 +1,39 @@
+# 시크릿
+.env
+credentials.json
+token.json
+
+# 개인 데이터
+*.db
+*.db-wal
+*.db-shm
+auto_rules.json
+categories.json
+/uploads/
+/temp/
+/photo/
+
+# 패키지 내부 영수증 (만약 코드 변경으로 거기 저장될 경우 대비) — .gitkeep 제외
+kakeibo/static/uploads/receipts/*
+!kakeibo/static/uploads/receipts/.gitkeep
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.env.local
+
+# PyInstaller
+build/
+dist/
+*.spec
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

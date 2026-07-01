@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="d-flex gap-2 align-items-center mb-3">
+  <select id="stat-year" class="form-select form-select-sm w-auto bg-dark text-white border-secondary" onchange="loadStats()">
+    {% for y in range(2024, 2028) %}
+    <option value="{{ y }}" {% if y==year %}selected{% endif %}>{{ y }}년</option>
+    {% endfor %}
+  </select>
+  <select id="stat-month" class="form-select form-select-sm w-auto bg-dark text-white border-secondary" onchange="loadStats()">
+    {% for m in range(1,13) %}
+    <option value="{{ m }}" {% if m==month %}selected{% endif %}>{{ m }}월</option>
+    {% endfor %}
+  </select>
+</div>
+
+<!-- Annual monthly chart -->
+<div class="row g-3 mb-3">
+  <div class="col-lg-8">
+    <div class="card bg-dark border-secondary h-100">
+      <div class="card-header border-secondary small text-secondary">월별 수입/지출</div>
+      <div class="card-body"><canvas id="monthly-chart" height="120"></canvas></div>
+    </div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card bg-dark border-secondary h-100">
+      <div class="card-header border-secondary small text-secondary">카테고리별 지출</div>
+      <div class="card-body"><canvas id="cat-chart"></canvas></div>
+    </div>
+  </div>
+</div>
+
+<!-- Income vs expense -->
+<div class="row g-3">
+  <div class="col-lg-4">
+    <div class="card bg-dark border-secondary">
+      <div class="card-header border-secondary small text-secondary">이번달 요약</div>
+      <div class="card-body" id="summary-box">로딩 중...</div>
+    </div>
+  </div>
+  <div class="col-lg-8">
+    <div class="card bg-dark border-secondary">
+      <div class="card-header border-secondary small text-secondary">예산 vs 실제 지출</div>
+      <div class="card-body p-2" id="budget-vs-actual">로딩 중...</div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+let monthlyChart, catChart;
+
+function loadStats() {
+  const year  = document.getElementById('stat-year').value;
+  const month = document.getElementById('stat-month').value;
+  fetch(`/api/stats?year=${year}&month=${month}`)
+    .then(r => r.json())
+    .then(d => {
+      renderMonthly(d.monthly);
+      renderCat(d.cat_expense);
+      renderSummary(d.monthly, month);
+      renderBudgetVsActual(d.budgets, d.cat_expense);
+    });
+}
+
+function renderMonthly(data) {
+  const labels   = data.map(d => d.ym);
+  const expenses = data.map(d => Math.abs(d.expense || 0));
+  const incomes  = data.map(d => d.income || 0);
+  if (monthlyChart) monthlyChart.destroy();
+  monthlyChart = new Chart(document.getElementById('monthly-chart'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {label:'지출', data: expenses, backgroundColor:'rgba(220,53,69,0.7)'},
+        {label:'수입', data: incomes,  backgroundColor:'rgba(25,135,84,0.7)'},
+      ]
+    },
+    options: {
+      responsive: true,
+      plugins: {legend:{labels:{color:'#aaa'}}},
+      scales: {
+        x: {ticks:{color:'#aaa'}, grid:{color:'#333'}},
+        y: {ticks:{color:'#aaa'}, grid:{color:'#333'}},
+      }
+    }
+  });
+}
+
+function renderCat(data) {
+  const labels = data.map(d => d.minor || '기타');
+  const values = data.map(d => Math.abs(d.total || 0));
+  if (catChart) catChart.destroy();
+  catChart = new Chart(document.getElementById('cat-chart'), {
+    type: 'doughnut',
+    data: {
+      labels,
+      datasets: [{data: values, borderWidth: 1}]
+    },
+    options: {
+      responsive: true,
+      plugins: {legend:{labels:{color:'#aaa', font:{size:11}}}}
+    }
+  });
+}
+
+function renderSummary(monthly, month) {
+  const row = monthly.find(d => d.ym.endsWith(`-${String(month).padStart(2,'0')}`));
+  const expense = row ? Math.abs(row.expense || 0) : 0;
+  const income  = row ? (row.income || 0) : 0;
+  document.getElementById('summary-box').innerHTML = `
+    <div class="d-flex justify-content-between mb-2">
+      <span class="text-secondary">수입</span>
+      <span class="text-success fw-bold">¥${income.toLocaleString()}</span>
+    </div>
+    <div class="d-flex justify-content-between mb-2">
+      <span class="text-secondary">지출</span>
+      <span class="text-danger fw-bold">¥${expense.toLocaleString()}</span>
+    </div>
+    <hr class="border-secondary">
+    <div class="d-flex justify-content-between">
+      <span class="text-secondary">순수지</span>
+      <span class="fw-bold ${income - expense >= 0 ? 'text-success' : 'text-danger'}">
+        ¥${(income - expense).toLocaleString()}
+      </span>
+    </div>`;
+}
+
+function renderBudgetVsActual(budgets, actuals) {
+  const actualsMap = {};
+  actuals.forEach(a => { actualsMap[a.minor] = Math.abs(a.total || 0); });
+
+  if (!budgets.length) {
+    document.getElementById('budget-vs-actual').innerHTML = '<span class="text-secondary small">예산이 설정되지 않았습니다.</span>';
+    return;
+  }
+
+  const rows = budgets.map(b => {
+    const actual  = actualsMap[b.minor] || 0;
+    const over    = actual > b.amount;
+    const pct     = b.amount ? Math.min(100, Math.round(actual / b.amount * 100)) : 0;
+    return `<div class="mb-2">
+      <div class="d-flex justify-content-between small mb-1">
+        <span>${b.major} / ${b.minor}</span>
+        <span class="${over?'text-danger':'text-secondary'}">¥${actual.toLocaleString()} / ¥${b.amount.toLocaleString()}</span>
+      </div>
+      <div class="progress" style="height:6px">
+        <div class="progress-bar ${over?'bg-danger':'bg-primary'}" style="width:${pct}%"></div>
+      </div>
+    </div>`;
+  }).join('');
+  document.getElementById('budget-vs-actual').innerHTML = rows;
+}
+
+loadStats();
+</script>
+{% endblock %}

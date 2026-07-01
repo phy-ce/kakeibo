@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h5 class="mb-0">휴지통 <span class="badge bg-secondary">{{ txs|length }}</span></h5>
+  {% if txs %}
+  <button class="btn btn-sm btn-outline-danger" onclick="emptyTrash()">
+    <i class="bi bi-trash3"></i> 전체 영구삭제
+  </button>
+  {% endif %}
+</div>
+
+{% if txs %}
+<table class="table table-dark table-hover table-sm">
+  <thead class="text-secondary">
+    <tr>
+      <th>삭제일시</th><th>날짜</th><th>구입처</th><th>품목</th>
+      <th class="text-end">금액</th><th>소스</th><th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for t in txs %}
+    <tr id="trash-{{ t.id }}">
+      <td class="text-secondary small">{{ t.deleted_at }}</td>
+      <td class="text-secondary small">{{ t.date }}</td>
+      <td class="small">{{ t.shop or '' }}</td>
+      <td class="small">{{ t.item or '' }}</td>
+      <td class="text-end text-danger small">{{ "¥{:,.0f}".format(t.jpy_amount or 0) }}</td>
+      <td><span class="badge bg-secondary small">{{ t.source }}</span></td>
+      <td class="d-flex gap-1">
+        <button class="btn btn-sm btn-outline-success" onclick="restoreTx({{ t.id }})">
+          <i class="bi bi-arrow-counterclockwise"></i> 복원
+        </button>
+        <button class="btn btn-sm btn-outline-danger" onclick="destroyTx({{ t.id }})">
+          <i class="bi bi-trash3"></i>
+        </button>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="text-center text-secondary py-5">휴지통이 비어있습니다.</div>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function restoreTx(id) {
+  fetch(`/api/transactions/${id}/restore`, {method:'POST'})
+    .then(() => document.getElementById(`trash-${id}`).remove());
+}
+
+function destroyTx(id) {
+  if (!confirm('영구 삭제하시겠습니까? 복구할 수 없습니다.')) return;
+  fetch(`/api/transactions/${id}/destroy`, {method:'DELETE'})
+    .then(() => document.getElementById(`trash-${id}`).remove());
+}
+
+function emptyTrash() {
+  if (!confirm('전체 영구 삭제하시겠습니까? 복구할 수 없습니다.')) return;
+  fetch('/api/trash/empty', {method:'DELETE'}).then(() => location.reload());
+}
+</script>
+{% endblock %}

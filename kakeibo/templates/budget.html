@@ -1,0 +1,245 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="d-flex gap-2 align-items-center mb-3">
+  <select id="bud-year" class="form-select form-select-sm w-auto bg-dark text-white border-secondary" onchange="goMonth()">
+    {% for y in range(2024, 2028) %}
+    <option value="{{ y }}" {% if y==year %}selected{% endif %}>{{ y }}년</option>
+    {% endfor %}
+  </select>
+  <select id="bud-month" class="form-select form-select-sm w-auto bg-dark text-white border-secondary" onchange="goMonth()">
+    {% for m in range(1,13) %}
+    <option value="{{ m }}" {% if m==month %}selected{% endif %}>{{ m }}월</option>
+    {% endfor %}
+  </select>
+  <button class="btn btn-sm btn-success ms-2" onclick="openAddBudget()">
+    <i class="bi bi-plus"></i> 예산 항목 추가
+  </button>
+  <button class="btn btn-sm btn-outline-secondary" onclick="copyPrevMonth()">
+    <i class="bi bi-arrow-clockwise"></i> 지난달 복사
+  </button>
+</div>
+
+<table class="table table-dark table-sm align-middle">
+  <thead class="text-secondary">
+    <tr>
+      <th>항목명</th>
+      <th>매칭조건</th>
+      <th class="text-end">예산</th>
+      <th class="text-end">실제 지출</th>
+      <th class="text-end">잔여</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for b in budget_data %}
+    <tr {% if b.exceeded %}class="table-danger"{% endif %}>
+      <td class="fw-semibold">{{ b.name }}</td>
+      <td class="small text-secondary">
+        {% if b.match_shop  %}<span class="badge bg-secondary me-1">구입처: {{ b.match_shop }}</span>{% endif %}
+        {% if b.match_item  %}<span class="badge bg-secondary me-1">품목: {{ b.match_item }}</span>{% endif %}
+        {% if b.match_major %}<span class="badge bg-info text-dark me-1">대: {{ b.match_major }}</span>{% endif %}
+        {% if b.match_minor %}<span class="badge bg-info text-dark me-1">소: {{ b.match_minor }}</span>{% endif %}
+        {% if b.match_sub   %}<span class="badge bg-info text-dark me-1">세부: {{ b.match_sub }}</span>{% endif %}
+        {% if not (b.match_shop or b.match_item or b.match_major or b.match_minor or b.match_sub) %}
+        <span class="text-danger">매칭조건 없음</span>
+        {% endif %}
+      </td>
+      <td class="text-end">¥{{ "{:,.0f}".format(b.amount) }}</td>
+      <td class="text-end {% if b.exceeded %}text-danger fw-bold{% endif %}">
+        ¥{{ "{:,.0f}".format(b.actual|abs) }}
+      </td>
+      <td class="text-end {% if b.exceeded %}text-danger{% else %}text-secondary{% endif %}">
+        ¥{{ "{:,.0f}".format(b.amount - b.actual|abs) }}
+      </td>
+      <td class="text-nowrap">
+        <button class="btn btn-sm btn-outline-secondary me-1" onclick="openEditBudget({{ b.id }})">
+          <i class="bi bi-pencil"></i>
+        </button>
+        <button class="btn btn-sm btn-outline-danger" onclick="deleteBudget({{ b.id }})">
+          <i class="bi bi-trash"></i>
+        </button>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6" class="text-center text-secondary">예산 항목이 없습니다.</td></tr>
+    {% endfor %}
+  </tbody>
+  {% if budget_data %}
+  <tfoot>
+    <tr class="border-top fw-bold {% if totals.exceeded %}table-danger{% endif %}">
+      <td colspan="2" class="text-end">합계</td>
+      <td class="text-end">¥{{ "{:,.0f}".format(totals.budget) }}</td>
+      <td class="text-end {% if totals.exceeded %}text-danger{% endif %}">¥{{ "{:,.0f}".format(totals.actual) }}</td>
+      <td class="text-end {% if totals.exceeded %}text-danger{% else %}text-secondary{% endif %}">¥{{ "{:,.0f}".format(totals.remain) }}</td>
+      <td></td>
+    </tr>
+  </tfoot>
+  {% endif %}
+</table>
+
+<!-- Add modal -->
+<div class="modal fade" id="add-budget-modal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content bg-dark">
+      <div class="modal-header border-secondary">
+        <h5 class="modal-title" id="b-modal-title">예산 항목 추가</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="b-id">
+        <div class="mb-2">
+          <label class="form-label small">항목명 <span class="text-danger">*</span></label>
+          <input type="text" id="b-name" class="form-control form-control-sm bg-dark text-white border-secondary" placeholder="예: 넷플릭스, iCloud, 도시가스">
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">구입처 매칭 <span class="text-secondary">(부분일치)</span></label>
+          <input type="text" id="b-match-shop" class="form-control form-control-sm bg-dark text-white border-secondary" placeholder="예: 東京ガス">
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">품목 매칭 <span class="text-secondary">(부분일치, 선택)</span></label>
+          <input type="text" id="b-match-item" class="form-control form-control-sm bg-dark text-white border-secondary" placeholder="예: iCloud+ 200GB">
+        </div>
+        <hr class="border-secondary">
+        <div class="text-secondary small mb-2">카테고리 매칭 (선택, 정확히 일치)</div>
+        <div class="row g-2 mb-2">
+          <div class="col-4">
+            <label class="form-label small">대분류</label>
+            <select id="b-match-major" class="form-select form-select-sm bg-dark text-white border-secondary" onchange="loadMatchMinor()">
+              <option value=""></option>
+            </select>
+          </div>
+          <div class="col-4">
+            <label class="form-label small">소분류</label>
+            <select id="b-match-minor" class="form-select form-select-sm bg-dark text-white border-secondary" onchange="loadMatchSub()">
+              <option value=""></option>
+            </select>
+          </div>
+          <div class="col-4">
+            <label class="form-label small">세부</label>
+            <select id="b-match-sub" class="form-select form-select-sm bg-dark text-white border-secondary">
+              <option value=""></option>
+            </select>
+          </div>
+        </div>
+        <hr class="border-secondary">
+        <div class="mb-2">
+          <label class="form-label small">예산 (엔화) <span class="text-danger">*</span></label>
+          <input type="number" id="b-amount" class="form-control form-control-sm bg-dark text-white border-secondary" placeholder="예: 3000">
+        </div>
+        <div class="text-secondary small">
+          ※ 매칭조건들은 AND 로 결합돼. 하나라도 입력해야 실제지출이 집계됨.
+        </div>
+      </div>
+      <div class="modal-footer border-secondary">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">취소</button>
+        <button class="btn btn-primary btn-sm" onclick="saveBudget()">저장</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const curYear    = {{ year }};
+const curMonth   = {{ month }};
+const categories = {{ categories|tojson }};
+
+// Initial major-category dropdown
+(function initMatchMajors() {
+  const majors = [...new Set(categories.map(c => c.major))];
+  document.getElementById('b-match-major').innerHTML =
+    '<option value=""></option>' + majors.map(m => `<option>${m}</option>`).join('');
+})();
+
+function loadMatchMinor() {
+  const major  = document.getElementById('b-match-major').value;
+  const minors = [...new Set(categories.filter(c => c.major === major).map(c => c.minor))];
+  document.getElementById('b-match-minor').innerHTML =
+    '<option value=""></option>' + minors.map(m => `<option>${m}</option>`).join('');
+  document.getElementById('b-match-sub').innerHTML = '<option value=""></option>';
+}
+
+function loadMatchSub() {
+  const major = document.getElementById('b-match-major').value;
+  const minor = document.getElementById('b-match-minor').value;
+  const subs  = categories.filter(c => c.major === major && c.minor === minor).map(c => c.sub);
+  document.getElementById('b-match-sub').innerHTML =
+    '<option value=""></option>' + subs.map(s => `<option>${s}</option>`).join('');
+}
+
+function goMonth() {
+  const y = document.getElementById('bud-year').value;
+  const m = document.getElementById('bud-month').value;
+  window.location.href = `/budget?year=${y}&month=${m}`;
+}
+
+function openAddBudget() {
+  document.getElementById('b-modal-title').textContent = '예산 항목 추가';
+  document.getElementById('b-id').value = '';
+  document.getElementById('b-name').value = '';
+  document.getElementById('b-match-shop').value = '';
+  document.getElementById('b-match-item').value = '';
+  document.getElementById('b-match-major').value = '';
+  loadMatchMinor();  // reset minor/sub
+  document.getElementById('b-amount').value = '';
+  new bootstrap.Modal(document.getElementById('add-budget-modal')).show();
+}
+
+function openEditBudget(id) {
+  fetch(`/api/budget/${id}`).then(r => r.json()).then(b => {
+    document.getElementById('b-modal-title').textContent = '예산 항목 수정';
+    document.getElementById('b-id').value         = b.id;
+    document.getElementById('b-name').value       = b.name || '';
+    document.getElementById('b-match-shop').value = b.match_shop || '';
+    document.getElementById('b-match-item').value = b.match_item || '';
+    document.getElementById('b-match-major').value = b.match_major || '';
+    loadMatchMinor();
+    document.getElementById('b-match-minor').value = b.match_minor || '';
+    loadMatchSub();
+    document.getElementById('b-match-sub').value   = b.match_sub || '';
+    document.getElementById('b-amount').value     = b.amount || '';
+    new bootstrap.Modal(document.getElementById('add-budget-modal')).show();
+  });
+}
+
+function saveBudget() {
+  const id     = document.getElementById('b-id').value;
+  const name   = document.getElementById('b-name').value.trim();
+  const amount = parseFloat(document.getElementById('b-amount').value);
+  if (!name || !amount) { alert('항목명과 예산은 필수임'); return; }
+  const item = {
+    name,
+    match_shop:  document.getElementById('b-match-shop').value.trim(),
+    match_item:  document.getElementById('b-match-item').value.trim(),
+    match_major: document.getElementById('b-match-major').value,
+    match_minor: document.getElementById('b-match-minor').value,
+    match_sub:   document.getElementById('b-match-sub').value,
+    amount,
+  };
+  const url    = id ? `/api/budget/${id}` : '/api/budget';
+  const method = id ? 'PUT' : 'POST';
+  const body   = id ? item : { year: curYear, month: curMonth, items: [item] };
+  fetch(url, {method, headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)})
+    .then(() => location.reload());
+}
+
+function deleteBudget(id) {
+  if (!confirm('삭제하시겠습니까?')) return;
+  fetch(`/api/budget/${id}`, {method:'DELETE'}).then(() => location.reload());
+}
+
+function copyPrevMonth() {
+  if (!confirm('지난달 예산 항목들을 이번 달로 복사할까요?')) return;
+  fetch('/api/budget/copy-prev', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({year: curYear, month: curMonth})
+  }).then(r => r.json()).then(d => {
+    alert(`${d.copied || 0}개 복사 완료`);
+    location.reload();
+  });
+}
+</script>
+{% endblock %}

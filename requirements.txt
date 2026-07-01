@@ -1,0 +1,14 @@
+flask
+python-dotenv
+pillow
+openpyxl
+pandas
+requests
+google-generativeai
+google-auth
+google-auth-oauthlib
+google-api-python-client
+beautifulsoup4
+
+# dev (exe 빌드용, 사용자는 설치 안 해도 됨)
+pyinstaller

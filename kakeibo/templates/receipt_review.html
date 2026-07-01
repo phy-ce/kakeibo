@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h5 class="mb-0">영수증 확인</h5>
+  <div class="d-flex gap-2">
+    <button class="btn btn-secondary btn-sm" onclick="history.back()">취소</button>
+    <button class="btn btn-success btn-sm" onclick="confirmAll()">전체 저장</button>
+  </div>
+</div>
+
+<div id="review-container">
+{% for result in results %}
+<div class="card bg-dark border-secondary mb-4">
+  <div class="card-header d-flex align-items-center gap-3 border-secondary">
+    <img src="/temp/{{ session_id }}/{{ result.image }}"
+         onclick="showReceipt('/temp/{{ session_id }}/{{ result.image }}')"
+         title="클릭하면 크게 보기"
+         style="height:80px;border-radius:4px;cursor:zoom-in" onerror="this.style.display='none'">
+    {% if result['items']|length == 0 %}
+      <span class="badge bg-warning text-dark">품목 인식 안 됨 — 사진이 흐리거나 영수증이 아닐 수 있어요 (그냥 두면 추가 안 됨)</span>
+    {% else %}
+      <span class="text-secondary small">{{ result['items']|length }}개 품목</span>
+    {% endif %}
+  </div>
+  <div class="card-body p-2">
+    {% for item in result['items'] %}
+    <div class="review-item border border-secondary rounded p-2 mb-2" data-image="{{ result.image }}">
+      <div class="row g-2">
+        <div class="col-md-2">
+          <input type="date" class="form-control form-control-sm bg-dark text-white border-secondary field-date" value="{{ item.date or '' }}">
+        </div>
+        <div class="col-md-1">
+          <select class="form-select form-select-sm bg-dark text-white border-secondary field-type">
+            <option {% if item.type=='지출' %}selected{% endif %}>지출</option>
+            <option {% if item.type=='수입' %}selected{% endif %}>수입</option>
+          </select>
+        </div>
+        <div class="col-md-2">
+          <select class="form-select form-select-sm bg-dark text-white border-secondary field-major" onchange="reviewLoadMinor(this)">
+            <option value=""></option>
+            {% set majors = categories|map(attribute='major')|unique|list %}
+            {% for m in majors %}
+            <option {% if item.major==m %}selected{% endif %}>{{ m }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-2">
+          <select class="form-select form-select-sm bg-dark text-white border-secondary field-minor">
+            <option value="{{ item.minor or '' }}">{{ item.minor or '' }}</option>
+          </select>
+        </div>
+        <div class="col-md-2">
+          <select class="form-select form-select-sm bg-dark text-white border-secondary field-sub">
+            <option value="{{ item.sub or '' }}">{{ item.sub or '' }}</option>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <input type="text" class="form-control form-control-sm bg-dark text-white border-secondary field-shop" value="{{ item.shop or '' }}" placeholder="구입처">
+        </div>
+        <div class="col-md-6">
+          <input type="text" class="form-control form-control-sm bg-dark text-white border-secondary field-item" value="{{ item.item or '' }}" placeholder="품목명">
+        </div>
+        <div class="col-md-2">
+          <input type="number" class="form-control form-control-sm bg-dark text-white border-secondary field-amount" value="{{ item.amount or '' }}" placeholder="금액">
+        </div>
+        <div class="col-md-1 d-flex align-items-center">
+          <button class="btn btn-sm btn-outline-danger" onclick="this.closest('.review-item').remove()"><i class="bi bi-trash"></i></button>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endfor %}
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const allCats = {{ categories|tojson }};
+const sessionId = "{{ session_id }}";
+
+function reviewLoadMinor(majorSel) {
+  const item  = majorSel.closest('.review-item');
+  const major = majorSel.value;
+  const minors = [...new Set(allCats.filter(c => c.major === major).map(c => c.minor))];
+  const minorSel = item.querySelector('.field-minor');
+  minorSel.innerHTML = '<option value=""></option>' + minors.map(m => `<option>${m}</option>`).join('');
+  reviewLoadSub(minorSel);
+}
+
+function reviewLoadSub(minorSel) {
+  const item  = minorSel.closest('.review-item');
+  const major = item.querySelector('.field-major').value;
+  const minor = minorSel.value;
+  const subs  = allCats.filter(c => c.major===major && c.minor===minor).map(c => c.sub);
+  item.querySelector('.field-sub').innerHTML = '<option value=""></option>' + subs.map(s => `<option>${s}</option>`).join('');
+}
+
+function confirmAll() {
+  const items = [];
+  document.querySelectorAll('.review-item').forEach(el => {
+    items.push({
+      image:  el.dataset.image,
+      date:   el.querySelector('.field-date').value,
+      type:   el.querySelector('.field-type').value,
+      major:  el.querySelector('.field-major').value,
+      minor:  el.querySelector('.field-minor').value,
+      sub:    el.querySelector('.field-sub').value,
+      shop:   el.querySelector('.field-shop').value,
+      item:   el.querySelector('.field-item').value,
+      amount: parseFloat(el.querySelector('.field-amount').value) || null,
+    });
+  });
+  fetch('/api/receipts/confirm', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({session_id: sessionId, items})
+  }).then(r => r.json()).then(d => {
+    alert(`${d.saved}개 저장 완료`);
+    window.location.href = '/transactions';
+  });
+}
+</script>
+{% endblock %}
