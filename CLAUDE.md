@@ -12,6 +12,7 @@ pip install -r requirements.txt
 
 - Entry point: `kakeibo/__main__.py` → `main()`. Secrets are prepared via `config.prompt_missing_keys()` **before** importing the app (order matters — the app/ocr modules read env at import time).
 - Change port: env `FLASK_PORT`. Disable browser auto-open: `KAKEIBO_NO_BROWSER=1`.
+- Language: env `KAKEIBO_LANG` (`ko` default / `en`). Deploy KR/EN separately with different `KAKEIBO_LANG` + `KAKEIBO_HOME` (see i18n below).
 
 ## Core principle: code / data separation
 
@@ -30,6 +31,7 @@ kakeibo/                     # Python package
 ├── __main__.py              # entry point
 ├── app.py                   # all Flask routes (pages + /api/*)
 ├── config.py                # secret/data paths, .env load, Gmail status, data migration
+├── i18n.py                  # UI i18n: t()/cat_label()/category_map(), language from KAKEIBO_LANG
 ├── db.py                    # SQLite schema/migrations, data paths, backfill
 ├── exchange.py              # exchange-rate lookup
 ├── auto_rules.py            # auto-classification rules (applied to PayPay import only)
@@ -62,6 +64,21 @@ Fetch with a broad Gmail query, then **pre-filter before calling the AI** (`_loo
 - User settings (settings page): `email_sender_allowlist`, `email_keywords` (comma-separated, **fill = replace defaults, empty = defaults**), `mail_sync_days`. Defaults are `generic._DEFAULT_SENDERS/_DEFAULT_KEYWORDS`.
 - Free-quota handling (gemini-3.5-flash: 5/min, 20/day): on 429, `gemini.QuotaError` → **stop the sync immediately** (avoids a flood), save what was processed, continue on the next run.
 
+## Internationalization (i18n) — `kakeibo/i18n.py`
+
+Single codebase; **language is chosen at deploy time** by env `KAKEIBO_LANG` (`ko` default / `en`). Deploy the same code twice (KR and EN), each with its own `KAKEIBO_HOME`/DB. No runtime toggle, no template forking.
+
+Principle: **the engine stays Korean; only the frontend display is localized.** DB category values (`지출`/`수입`/`변동지출`/…), SQL filters (`type='지출'`, `LIKE '교통%'`), Python type defaults, and Gemini prompts all stay Korean regardless of UI language.
+
+- `t(key, **kw)` — UI string from `TRANSLATIONS` (`key -> (ko, en)` tuple), falls back ko then key. Registered as a Jinja global (like `get_setting`); also imported in `app.py`/`sync`/`ocr` to wrap user-facing `jsonify`/error/Excel messages.
+- `cat_label(value)` — localized display label for a category value (returns the value itself if unknown or in ko). `_CATEGORY_EN` covers the default seed (`db.py CATEGORIES_DEFAULT`); user-added categories display as typed.
+- `category_map()` — the label map exposed to client JS via `window.CAT_LABELS` + `catLabel()` (in `base.html`) so JS-built category dropdowns localize too.
+- Category `<option>`: `value` = Korean canonical, display = `cat_label`/`catLabel` — so submitted/stored values stay Korean and engine logic is untouched.
+
+**Gotcha**: templates use `t` as the translation global, so **never name a Jinja loop/macro variable `t`** (it shadows the function → `'dict' object is not callable`). Transaction loops/macros use `tx`.
+
+Add a language: extend the tuples / add a lang branch in `i18n.py`; templates need no change.
+
 ## Notes / gotchas
 
 - **Windows Korean console (cp949)**: printing non-cp949 characters like `—`/`→`/emoji to the console raises `UnicodeEncodeError`. Keep console `print()` output ASCII.
@@ -73,4 +90,5 @@ Fetch with a broad Gmail query, then **pre-filter before calling the AI** (`_loo
 ## Conventions
 
 - **Commit messages must always be written in English.**
-- **Code comments and docstrings must be written in English.** User-facing strings — UI/template text, `print()`/console output, error/`jsonify` messages, and Gemini prompt strings — stay Korean.
+- **Code comments and docstrings must be written in English.**
+- User-facing UI strings and messages are localized in `kakeibo/i18n.py` (ko + en) — add new ones there via `t('key')` / `cat_label()` rather than hardcoding text in templates or `jsonify`. Console `print()` prompts, **Gemini prompt strings**, and **DB category values** stay Korean (engine internals).
