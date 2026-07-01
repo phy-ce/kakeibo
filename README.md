@@ -3,7 +3,7 @@
 A personal household-budget app for residents of Japan — a local web app built on Flask + SQLite.
 Manages JPY (¥) and KRW (₩) balances **independently**; the exchange rate is shown for reference only.
 
-> The app UI is in Korean (it is built for a Korean user living in Japan).
+> The UI ships in **Korean and English**, chosen at deploy time via the `KAKEIBO_LANG` env var (`ko` default / `en`). See [Language (KR / EN)](#language-kr--en).
 
 ## Features
 
@@ -58,11 +58,26 @@ Secrets (API keys) are stored in the **user home, not the project folder** (`~/.
 ### Run
 
 ```bash
-run.bat                          # Windows (auto-opens the browser)
+run.bat                          # Korean  → http://localhost:5000  (data: ~/.kakeibo)
+run_en.bat                       # English → http://localhost:5001  (data: ~/.kakeibo-en)
 # python -m kakeibo              # run directly
 ```
 
-→ http://localhost:5000
+## Language (KR / EN)
+
+One codebase; the language is chosen **at launch** by the `KAKEIBO_LANG` env var (`ko` default / `en`). Deploy the same code as two instances — Korean and English — each with its own data folder (`KAKEIBO_HOME`) and port. No runtime toggle, no forked templates.
+
+| | Korean | English |
+|---|---|---|
+| Launcher | `run.bat` | `run_en.bat` |
+| `KAKEIBO_LANG` | `ko` | `en` |
+| `KAKEIBO_HOME` (data) | `~/.kakeibo` | `~/.kakeibo-en` |
+| Port | 5000 | 5001 |
+
+- Only the **frontend display** is localized (`kakeibo/i18n.py`). The engine — DB category values, SQL, and the Gemini prompts — stays in Korean internally, so both instances behave identically.
+- Category names show localized labels while the stored value stays Korean; user-added categories display as typed.
+- Each instance keeps its **own DB and secrets** (they don't share data) and can run at the same time.
+- Add another language by extending the translation table in `kakeibo/i18n.py`; templates need no change.
 
 ## Install (Windows exe)
 
@@ -81,6 +96,7 @@ The DB (`kakeibo.db`), uploads folder, and temp folder are created next to the e
 kakeibo/                    # repo root
 ├── kakeibo/                # Python package
 │   ├── app.py              # Flask routes
+│   ├── i18n.py             # UI i18n (t / cat_label), language from KAKEIBO_LANG
 │   ├── db.py               # SQLite schema/migrations
 │   ├── exchange.py         # Yahoo Finance exchange rate
 │   ├── auto_rules.py       # auto-classification rule engine
@@ -93,7 +109,7 @@ kakeibo/                    # repo root
 │   ├── templates/          # Jinja2 HTML
 │   └── static/             # CSS/JS
 ├── requirements.txt
-├── run.bat / build.bat
+├── run.bat / run_en.bat / build.bat
 ├── .env.example
 └── auto_rules.json.example
 ```
