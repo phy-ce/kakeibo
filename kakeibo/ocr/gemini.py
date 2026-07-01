@@ -8,6 +8,8 @@ from google import genai
 from google.genai import types
 from PIL import Image
 
+from ..i18n import t
+
 MODEL_ID = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
 
 _client = None
@@ -38,12 +40,7 @@ def _get_client():
         # Read the key at call time (so it is not affected by import order).
         api_key = os.environ.get("GEMINI_API_KEY")
         if not api_key:
-            raise RuntimeError(
-                "환경변수 GEMINI_API_KEY 가 설정되지 않았습니다. "
-                "첫 실행 시 콘솔에서 키를 입력하거나 "
-                "~/.kakeibo/.env 에 GEMINI_API_KEY=... 를 추가해 주세요. "
-                "(키 발급: https://aistudio.google.com/app/apikey)"
-            )
+            raise RuntimeError(t('msg.no_api_key'))
         _client = genai.Client(api_key=api_key)
     return _client
 

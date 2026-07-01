@@ -2,10 +2,10 @@
 {% block content %}
 
 <div class="d-flex justify-content-between align-items-center mb-3">
-  <h5 class="mb-0">휴지통 <span class="badge bg-secondary">{{ txs|length }}</span></h5>
+  <h5 class="mb-0">{{ t('trash.title') }} <span class="badge bg-secondary">{{ txs|length }}</span></h5>
   {% if txs %}
   <button class="btn btn-sm btn-outline-danger" onclick="emptyTrash()">
-    <i class="bi bi-trash3"></i> 전체 영구삭제
+    <i class="bi bi-trash3"></i> {{ t('trash.delete_all_permanently') }}
   </button>
   {% endif %}
 </div>
@@ -14,24 +14,24 @@
 <table class="table table-dark table-hover table-sm">
   <thead class="text-secondary">
     <tr>
-      <th>삭제일시</th><th>날짜</th><th>구입처</th><th>품목</th>
-      <th class="text-end">금액</th><th>소스</th><th></th>
+      <th>{{ t('trash.deleted_at') }}</th><th>{{ t('common.date') }}</th><th>{{ t('common.shop') }}</th><th>{{ t('common.item') }}</th>
+      <th class="text-end">{{ t('common.amount') }}</th><th>{{ t('trash.source') }}</th><th></th>
     </tr>
   </thead>
   <tbody>
-    {% for t in txs %}
-    <tr id="trash-{{ t.id }}">
-      <td class="text-secondary small">{{ t.deleted_at }}</td>
-      <td class="text-secondary small">{{ t.date }}</td>
-      <td class="small">{{ t.shop or '' }}</td>
-      <td class="small">{{ t.item or '' }}</td>
-      <td class="text-end text-danger small">{{ "¥{:,.0f}".format(t.jpy_amount or 0) }}</td>
-      <td><span class="badge bg-secondary small">{{ t.source }}</span></td>
+    {% for tx in txs %}
+    <tr id="trash-{{ tx.id }}">
+      <td class="text-secondary small">{{ tx.deleted_at }}</td>
+      <td class="text-secondary small">{{ tx.date }}</td>
+      <td class="small">{{ tx.shop or '' }}</td>
+      <td class="small">{{ tx.item or '' }}</td>
+      <td class="text-end text-danger small">{{ "¥{:,.0f}".format(tx.jpy_amount or 0) }}</td>
+      <td><span class="badge bg-secondary small">{{ tx.source }}</span></td>
       <td class="d-flex gap-1">
-        <button class="btn btn-sm btn-outline-success" onclick="restoreTx({{ t.id }})">
-          <i class="bi bi-arrow-counterclockwise"></i> 복원
+        <button class="btn btn-sm btn-outline-success" onclick="restoreTx({{ tx.id }})">
+          <i class="bi bi-arrow-counterclockwise"></i> {{ t('trash.restore') }}
         </button>
-        <button class="btn btn-sm btn-outline-danger" onclick="destroyTx({{ t.id }})">
+        <button class="btn btn-sm btn-outline-danger" onclick="destroyTx({{ tx.id }})">
           <i class="bi bi-trash3"></i>
         </button>
       </td>
@@ -40,7 +40,7 @@
   </tbody>
 </table>
 {% else %}
-<div class="text-center text-secondary py-5">휴지통이 비어있습니다.</div>
+<div class="text-center text-secondary py-5">{{ t('trash.empty') }}</div>
 {% endif %}
 
 {% endblock %}
@@ -53,13 +53,13 @@ function restoreTx(id) {
 }
 
 function destroyTx(id) {
-  if (!confirm('영구 삭제하시겠습니까? 복구할 수 없습니다.')) return;
+  if (!confirm({{ t('trash.confirm_destroy')|tojson }})) return;
   fetch(`/api/transactions/${id}/destroy`, {method:'DELETE'})
     .then(() => document.getElementById(`trash-${id}`).remove());
 }
 
 function emptyTrash() {
-  if (!confirm('전체 영구 삭제하시겠습니까? 복구할 수 없습니다.')) return;
+  if (!confirm({{ t('trash.confirm_empty')|tojson }})) return;
   fetch('/api/trash/empty', {method:'DELETE'}).then(() => location.reload());
 }
 </script>

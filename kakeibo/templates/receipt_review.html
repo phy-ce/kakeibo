@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
-  <h5 class="mb-0">영수증 확인</h5>
+  <h5 class="mb-0">{{ t('receipt.review_receipt') }}</h5>
   <div class="d-flex gap-2">
-    <button class="btn btn-secondary btn-sm" onclick="history.back()">취소</button>
-    <button class="btn btn-success btn-sm" onclick="confirmAll()">전체 저장</button>
+    <button class="btn btn-secondary btn-sm" onclick="history.back()">{{ t('common.cancel') }}</button>
+    <button class="btn btn-success btn-sm" onclick="confirmAll()">{{ t('receipt.save_all') }}</button>
   </div>
 </div>
 
@@ -14,12 +14,12 @@
   <div class="card-header d-flex align-items-center gap-3 border-secondary">
     <img src="/temp/{{ session_id }}/{{ result.image }}"
          onclick="showReceipt('/temp/{{ session_id }}/{{ result.image }}')"
-         title="클릭하면 크게 보기"
+         title="{{ t('receipt.click_to_enlarge') }}"
          style="height:80px;border-radius:4px;cursor:zoom-in" onerror="this.style.display='none'">
     {% if result['items']|length == 0 %}
-      <span class="badge bg-warning text-dark">품목 인식 안 됨 — 사진이 흐리거나 영수증이 아닐 수 있어요 (그냥 두면 추가 안 됨)</span>
+      <span class="badge bg-warning text-dark">{{ t('receipt.no_items_recognized') }}</span>
     {% else %}
-      <span class="text-secondary small">{{ result['items']|length }}개 품목</span>
+      <span class="text-secondary small">{{ result['items']|length }}{{ t('receipt.items_count_suffix') }}</span>
     {% endif %}
   </div>
   <div class="card-body p-2">
@@ -31,8 +31,8 @@
         </div>
         <div class="col-md-1">
           <select class="form-select form-select-sm bg-dark text-white border-secondary field-type">
-            <option {% if item.type=='지출' %}selected{% endif %}>지출</option>
-            <option {% if item.type=='수입' %}selected{% endif %}>수입</option>
+            <option value="지출" {% if item.type=='지출' %}selected{% endif %}>{{ cat_label('지출') }}</option>
+            <option value="수입" {% if item.type=='수입' %}selected{% endif %}>{{ cat_label('수입') }}</option>
           </select>
         </div>
         <div class="col-md-2">
@@ -40,28 +40,28 @@
             <option value=""></option>
             {% set majors = categories|map(attribute='major')|unique|list %}
             {% for m in majors %}
-            <option {% if item.major==m %}selected{% endif %}>{{ m }}</option>
+            <option value="{{ m }}" {% if item.major==m %}selected{% endif %}>{{ cat_label(m) }}</option>
             {% endfor %}
           </select>
         </div>
         <div class="col-md-2">
           <select class="form-select form-select-sm bg-dark text-white border-secondary field-minor">
-            <option value="{{ item.minor or '' }}">{{ item.minor or '' }}</option>
+            <option value="{{ item.minor or '' }}">{{ cat_label(item.minor or '') }}</option>
           </select>
         </div>
         <div class="col-md-2">
           <select class="form-select form-select-sm bg-dark text-white border-secondary field-sub">
-            <option value="{{ item.sub or '' }}">{{ item.sub or '' }}</option>
+            <option value="{{ item.sub or '' }}">{{ cat_label(item.sub or '') }}</option>
           </select>
         </div>
         <div class="col-md-3">
-          <input type="text" class="form-control form-control-sm bg-dark text-white border-secondary field-shop" value="{{ item.shop or '' }}" placeholder="구입처">
+          <input type="text" class="form-control form-control-sm bg-dark text-white border-secondary field-shop" value="{{ item.shop or '' }}" placeholder="{{ t('common.shop') }}">
         </div>
         <div class="col-md-6">
-          <input type="text" class="form-control form-control-sm bg-dark text-white border-secondary field-item" value="{{ item.item or '' }}" placeholder="품목명">
+          <input type="text" class="form-control form-control-sm bg-dark text-white border-secondary field-item" value="{{ item.item or '' }}" placeholder="{{ t('receipt.item_name') }}">
         </div>
         <div class="col-md-2">
-          <input type="number" class="form-control form-control-sm bg-dark text-white border-secondary field-amount" value="{{ item.amount or '' }}" placeholder="금액">
+          <input type="number" class="form-control form-control-sm bg-dark text-white border-secondary field-amount" value="{{ item.amount or '' }}" placeholder="{{ t('common.amount') }}">
         </div>
         <div class="col-md-1 d-flex align-items-center">
           <button class="btn btn-sm btn-outline-danger" onclick="this.closest('.review-item').remove()"><i class="bi bi-trash"></i></button>
@@ -86,7 +86,7 @@ function reviewLoadMinor(majorSel) {
   const major = majorSel.value;
   const minors = [...new Set(allCats.filter(c => c.major === major).map(c => c.minor))];
   const minorSel = item.querySelector('.field-minor');
-  minorSel.innerHTML = '<option value=""></option>' + minors.map(m => `<option>${m}</option>`).join('');
+  minorSel.innerHTML = '<option value=""></option>' + minors.map(m => `<option value="${m}">${catLabel(m)}</option>`).join('');
   reviewLoadSub(minorSel);
 }
 
@@ -95,7 +95,7 @@ function reviewLoadSub(minorSel) {
   const major = item.querySelector('.field-major').value;
   const minor = minorSel.value;
   const subs  = allCats.filter(c => c.major===major && c.minor===minor).map(c => c.sub);
-  item.querySelector('.field-sub').innerHTML = '<option value=""></option>' + subs.map(s => `<option>${s}</option>`).join('');
+  item.querySelector('.field-sub').innerHTML = '<option value=""></option>' + subs.map(s => `<option value="${s}">${catLabel(s)}</option>`).join('');
 }
 
 function confirmAll() {
@@ -117,7 +117,7 @@ function confirmAll() {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({session_id: sessionId, items})
   }).then(r => r.json()).then(d => {
-    alert(`${d.saved}개 저장 완료`);
+    alert(d.saved + {{ t('receipt.saved_suffix')|tojson }});
     window.location.href = '/transactions';
   });
 }

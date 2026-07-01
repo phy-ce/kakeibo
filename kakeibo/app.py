@@ -33,6 +33,13 @@ app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-only-change-me")
 app.jinja_env.globals['get_setting'] = get_setting
 
+from . import i18n
+from .i18n import t
+app.jinja_env.globals['t'] = i18n.t
+app.jinja_env.globals['cat_label'] = i18n.cat_label
+app.jinja_env.globals['current_lang'] = i18n.current_lang
+app.jinja_env.globals['category_map'] = i18n.category_map
+
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -481,7 +488,7 @@ def api_stage():
 
     if not staged:
         shutil.rmtree(session_dir, ignore_errors=True)
-        return jsonify({'error': '지원하는 이미지가 없습니다'}), 400
+        return jsonify({'error': t('msg.no_supported_images')}), 400
 
     sf = os.path.join(TEMP_DIR, f"{session_id}.json")
     with open(sf, 'w', encoding='utf-8') as fp:
@@ -545,11 +552,10 @@ def api_analyze():
 
     resp = {'session_id': session_id, 'count': len(results)}
     if quota:
-        limit = '하루 20건' if quota.per_day else '분당 5건'
-        cont = '내일' if quota.per_day else '잠시 후'
+        limit = t('msg.quota.per_day') if quota.per_day else t('msg.quota.per_min')
+        cont = t('msg.cont.tomorrow') if quota.per_day else t('msg.cont.later')
         resp['quota_exceeded'] = True
-        resp['message'] = (f'{len(results)}개 분석 후 중단 — Gemini 무료 할당량({limit}) 초과. '
-                           f'나머지 사진은 분석하지 않았으니 {cont} 다시 업로드하세요. (가계부엔 추가 안 됨)')
+        resp['message'] = t('msg.receipt_quota_stopped', n=len(results), limit=limit, cont=cont)
     return jsonify(resp)
 
 
@@ -618,7 +624,7 @@ def api_paypay():
         return jsonify({'error': str(e)}), 400
 
     if '取引内容' not in df.columns:
-        return jsonify({'error': 'CSV 형식 오류'}), 400
+        return jsonify({'error': t('msg.csv_format_error')}), 400
 
     # Column name compatibility (handling PayPay CSV format changes)
     col_date = '取引日時' if '取引日時' in df.columns else '取引日'
@@ -628,7 +634,7 @@ def api_paypay():
     required = {col_date, col_shop, col_amt, '取引番号'}
     missing = required - set(df.columns)
     if missing:
-        return jsonify({'error': f'컬럼 누락: {missing}'}), 400
+        return jsonify({'error': t('msg.missing_columns', cols=missing)}), 400
 
     # Process only rows that have an outflow amount (includes 支払い, 請求書払い, etc.; チャージ is auto-excluded)
     def _has_outflow(v):
@@ -642,7 +648,7 @@ def api_paypay():
 
     payments = df[df[col_amt].apply(_has_outflow)].copy()
     if payments.empty:
-        return jsonify({'count': 0, 'message': '출금 거래 없음'})
+        return jsonify({'count': 0, 'message': t('msg.no_withdrawals')})
 
     conn = get_db()
     existing = set(r[0] for r in conn.execute(
@@ -680,7 +686,7 @@ def api_paypay():
         """, new_rows)
         conn.commit()
     conn.close()
-    return jsonify({'count': len(new_rows), 'message': f'{len(new_rows)}건 추가'})
+    return jsonify({'count': len(new_rows), 'message': t('msg.added_n', n=len(new_rows))})
 
 
 # ── api: email sync (AI, vendor-agnostic) ─────────────────────────────────────
@@ -701,16 +707,16 @@ def api_gmail_credentials():
     from . import config
     f = request.files.get('credentials')
     if not f:
-        return jsonify({'error': '파일이 없습니다'}), 400
+        return jsonify({'error': t('msg.no_file')}), 400
     try:
         raw = f.read()
         data = json.loads(raw.decode('utf-8'))
     except Exception:
-        return jsonify({'error': 'JSON 파일이 아닙니다'}), 400
+        return jsonify({'error': t('msg.not_json')}), 400
 
     node = data.get('installed') or data.get('web')
     if not node or not node.get('client_id') or not node.get('client_secret'):
-        return jsonify({'error': 'OAuth 클라이언트(데스크톱) credentials.json 이 아닙니다'}), 400
+        return jsonify({'error': t('msg.not_oauth_client')}), 400
 
     os.makedirs(config.user_config_dir(), exist_ok=True)
     dest = config.user_path('credentials.json')
@@ -720,7 +726,7 @@ def api_gmail_credentials():
     old_token = config.user_path('token.json')
     if os.path.exists(old_token):
         os.remove(old_token)
-    return jsonify({'ok': True, 'message': 'Gmail 자격증명 저장 완료. 첫 동기화 때 브라우저 인증이 열립니다.'})
+    return jsonify({'ok': True, 'message': t('msg.gmail_creds_saved')})
 
 
 # ── api: exchange rates ───────────────────────────────────────────────────────
@@ -754,7 +760,7 @@ def api_fetch_rates():
 
     conn.commit()
     conn.close()
-    return jsonify({'fetched': fetched, 'message': f'{fetched}개 날짜 환율 업데이트'})
+    return jsonify({'fetched': fetched, 'message': t('msg.rates_updated', n=fetched)})
 
 
 @app.route('/api/exchange-rates/<date_str>', methods=['PUT'])
@@ -961,9 +967,11 @@ def api_export():
     txs = [dict(r) for r in rows]
     wb  = openpyxl.Workbook()
     ws  = wb.active
-    ws.title = '시트'
-    ws.append(['날짜','구분','대분류','소분류','카테고리','구입처','품목명',
-                '엔화가격','원화가격','엔화잔고','원화잔고','비고','환율'])
+    ws.title = t('excel.sheet')
+    ws.append([t('excel.date'), t('excel.type'), t('excel.major'), t('excel.minor'),
+                t('excel.category'), t('excel.shop'), t('excel.item'),
+                t('excel.jpy_price'), t('excel.krw_price'), t('excel.jpy_balance'),
+                t('excel.krw_balance'), t('excel.note'), t('excel.rate')])
 
     for i, t in enumerate(txs, start=2):
         ws.append([

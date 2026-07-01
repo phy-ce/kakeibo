@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ko" data-bs-theme="dark">
+<html lang="{{ current_lang() }}" data-bs-theme="dark">
 <head>
   <meta charset="UTF-8">
   <title>Kakeibo</title>
@@ -12,14 +12,14 @@
 <nav class="navbar navbar-dark bg-dark border-bottom border-secondary px-3">
   <a class="navbar-brand fw-bold text-warning" href="/">Kakeibo</a>
   <div class="d-flex gap-3">
-    <a class="nav-link {% if request.endpoint=='transactions' %}text-white fw-bold{% else %}text-secondary{% endif %}" href="{{ url_for('transactions') }}">내역</a>
+    <a class="nav-link {% if request.endpoint=='transactions' %}text-white fw-bold{% else %}text-secondary{% endif %}" href="{{ url_for('transactions') }}">{{ t('nav.transactions') }}</a>
     <a class="nav-link {% if request.endpoint=='uncategorized' %}text-white fw-bold{% else %}text-secondary{% endif %}" href="{{ url_for('uncategorized') }}">
-      미분류
+      {{ t('nav.uncategorized') }}
       <span id="uncategorized-badge" class="badge bg-danger ms-1" style="display:none"></span>
     </a>
-    <a class="nav-link {% if request.endpoint=='stats' %}text-white fw-bold{% else %}text-secondary{% endif %}" href="{{ url_for('stats') }}">통계</a>
-    <a class="nav-link {% if request.endpoint=='budget' %}text-white fw-bold{% else %}text-secondary{% endif %}" href="{{ url_for('budget') }}">예산</a>
-    <a class="nav-link {% if request.endpoint=='settings' %}text-white fw-bold{% else %}text-secondary{% endif %}" href="{{ url_for('settings') }}">설정</a>
+    <a class="nav-link {% if request.endpoint=='stats' %}text-white fw-bold{% else %}text-secondary{% endif %}" href="{{ url_for('stats') }}">{{ t('nav.stats') }}</a>
+    <a class="nav-link {% if request.endpoint=='budget' %}text-white fw-bold{% else %}text-secondary{% endif %}" href="{{ url_for('budget') }}">{{ t('nav.budget') }}</a>
+    <a class="nav-link {% if request.endpoint=='settings' %}text-white fw-bold{% else %}text-secondary{% endif %}" href="{{ url_for('settings') }}">{{ t('nav.settings') }}</a>
     <a class="nav-link {% if request.endpoint=='trash' %}text-white fw-bold{% else %}text-secondary{% endif %}" href="{{ url_for('trash') }}"><i class="bi bi-trash3"></i></a>
   </div>
 </nav>
@@ -40,6 +40,10 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 <script>
+// Category value -> localized label (empty in ko; used by JS-built category dropdowns)
+window.CAT_LABELS = {{ category_map()|tojson }};
+window.catLabel = function(v) { return (v && window.CAT_LABELS[v]) || v; };
+
 function showReceipt(src) {
   document.getElementById('receipt-lightbox-img').src = src;
   document.getElementById('receipt-lightbox').style.display = 'flex';

@@ -5,12 +5,12 @@
 <div id="gmail-reminder" class="alert alert-info d-flex align-items-center justify-content-between py-2 mb-3">
   <div>
     <i class="bi bi-envelope-exclamation me-2"></i>
-    <strong>Gmail 연동이 안 돼 있어요</strong>
-    <span class="ms-2 small">주문·영수증 메일 자동 가져오기를 쓰려면 연동하세요.</span>
+    <strong>{{ t('tx.gmail_not_connected') }}</strong>
+    <span class="ms-2 small">{{ t('tx.gmail_connect_prompt') }}</span>
   </div>
   <div class="d-flex gap-2">
-    <a class="btn btn-sm btn-info" href="{{ url_for('settings') }}">설정으로</a>
-    <button class="btn btn-sm btn-outline-light" onclick="dismissGmailReminder()">다음부터 표시 안 함</button>
+    <a class="btn btn-sm btn-info" href="{{ url_for('settings') }}">{{ t('tx.go_to_settings') }}</a>
+    <button class="btn btn-sm btn-outline-light" onclick="dismissGmailReminder()">{{ t('tx.dont_show_again') }}</button>
   </div>
 </div>
 {% endif %}
@@ -19,12 +19,12 @@
 <div class="alert alert-warning d-flex align-items-center justify-content-between py-2 mb-3">
   <div>
     <i class="bi bi-exclamation-triangle-fill me-2"></i>
-    <strong>이번 주 교통비 미입력</strong>
+    <strong>{{ t('tx.no_transport_this_week') }}</strong>
     <span class="ms-2 small text-secondary">({{ transport_reminder.monday }} ~ {{ transport_reminder.sunday }})</span>
   </div>
   <div>
     <button class="btn btn-sm btn-warning" onclick="openTransportAdd()">
-      <i class="bi bi-plus-lg"></i> 지금 추가
+      <i class="bi bi-plus-lg"></i> {{ t('tx.add_now') }}
     </button>
   </div>
 </div>
@@ -35,39 +35,39 @@
 
   <!-- Filter -->
   <select id="filter-ym" class="form-select form-select-sm w-auto" onchange="applyFilter()">
-    <option value="">전체</option>
+    <option value="">{{ t('common.all') }}</option>
     {% for ym in year_months %}
     <option value="{{ ym }}" {% if filters.get('year') and filters.get('month') and '%s-%02d'|format(filters.year|int, filters.month|int) == ym %}selected{% endif %}>{{ ym }}</option>
     {% endfor %}
   </select>
 
   <select id="filter-type" class="form-select form-select-sm w-auto" onchange="applyFilter()">
-    <option value="">전체</option>
-    <option value="지출" {% if filters.get('type')=='지출' %}selected{% endif %}>지출</option>
-    <option value="수입" {% if filters.get('type')=='수입' %}selected{% endif %}>수입</option>
+    <option value="">{{ t('common.all') }}</option>
+    <option value="지출" {% if filters.get('type')=='지출' %}selected{% endif %}>{{ cat_label('지출') }}</option>
+    <option value="수입" {% if filters.get('type')=='수입' %}selected{% endif %}>{{ cat_label('수입') }}</option>
   </select>
 
   <select id="filter-major" class="form-select form-select-sm w-auto" onchange="applyFilter()">
-    <option value="">전체 카테고리</option>
+    <option value="">{{ t('tx.all_categories') }}</option>
     {% for m in majors %}
-    <option value="{{ m }}" {% if filters.get('major')==m %}selected{% endif %}>{{ m }}</option>
+    <option value="{{ m }}" {% if filters.get('major')==m %}selected{% endif %}>{{ cat_label(m) }}</option>
     {% endfor %}
   </select>
 
   <select id="filter-source" class="form-select form-select-sm w-auto" onchange="applyFilter()">
-    <option value="">전체 소스</option>
-    <option value="receipt"  {% if filters.get('source')=='receipt'  %}selected{% endif %}>영수증</option>
+    <option value="">{{ t('tx.all_sources') }}</option>
+    <option value="receipt"  {% if filters.get('source')=='receipt'  %}selected{% endif %}>{{ t('tx.receipt') }}</option>
     <option value="paypay"   {% if filters.get('source')=='paypay'   %}selected{% endif %}>PayPay</option>
     <option value="amazon"   {% if filters.get('source')=='amazon'   %}selected{% endif %}>Amazon</option>
     <option value="mcdonald" {% if filters.get('source')=='mcdonald' %}selected{% endif %}>マクド</option>
-    <option value="email"    {% if filters.get('source')=='email'    %}selected{% endif %}>메일(AI)</option>
-    <option value="manual"   {% if filters.get('source')=='manual'   %}selected{% endif %}>수동</option>
+    <option value="email"    {% if filters.get('source')=='email'    %}selected{% endif %}>{{ t('tx.mail_ai') }}</option>
+    <option value="manual"   {% if filters.get('source')=='manual'   %}selected{% endif %}>{{ t('tx.manual') }}</option>
   </select>
 
   <div class="ms-auto d-flex gap-2 flex-wrap">
     <!-- Receipt upload -->
     <button class="btn btn-sm btn-outline-light" onclick="document.getElementById('receipt-input').click()">
-      <i class="bi bi-receipt"></i> 영수증
+      <i class="bi bi-receipt"></i> {{ t('tx.receipt') }}
     </button>
     <input type="file" id="receipt-input" multiple accept="image/*" style="display:none" onchange="uploadReceipts(this)">
 
@@ -79,65 +79,65 @@
 
     <!-- Mail sync -->
     <button class="btn btn-sm btn-outline-warning" onclick="syncAllMail()">
-      <i class="bi bi-envelope-arrow-down"></i> 메일동기화
+      <i class="bi bi-envelope-arrow-down"></i> {{ t('tx.mail_sync') }}
     </button>
 
     <!-- Exchange rate update -->
     <button class="btn btn-sm btn-outline-info" onclick="fetchRates()">
-      <i class="bi bi-currency-exchange"></i> 환율
+      <i class="bi bi-currency-exchange"></i> {{ t('tx.exchange_rate') }}
     </button>
 
     <!-- Manual add -->
     <button class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#tx-modal" onclick="openAddModal()">
-      <i class="bi bi-plus"></i> 추가
+      <i class="bi bi-plus"></i> {{ t('common.add') }}
     </button>
 
     <!-- Bulk delete -->
     <button class="btn btn-sm btn-outline-danger" id="bulk-delete-btn" style="display:none" onclick="bulkDelete()">
-      <i class="bi bi-trash"></i> 선택삭제
+      <i class="bi bi-trash"></i> {{ t('tx.delete_selected') }}
     </button>
 
     <!-- Export -->
-    <a class="btn btn-sm btn-outline-secondary" href="/api/export/excel"><i class="bi bi-file-excel"></i> 내보내기</a>
+    <a class="btn btn-sm btn-outline-secondary" href="/api/export/excel"><i class="bi bi-file-excel"></i> {{ t('tx.export') }}</a>
   </div>
 </div>
 
-{% macro tx_row(t, item=false, gid=0) %}
-<tr id="row-{{ t.id }}" data-id="{{ t.id }}"{% if item %} class="rgroup-item g-{{ gid }}" style="display:none"{% endif %}>
-  <td><input type="checkbox" class="form-check-input tx-check" value="{{ t.id }}" onchange="updateBulkBtn()"></td>
-  <td class="text-secondary small{% if item %} ps-4{% endif %}">{{ t.date }}</td>
+{% macro tx_row(tx, item=false, gid=0) %}
+<tr id="row-{{ tx.id }}" data-id="{{ tx.id }}"{% if item %} class="rgroup-item g-{{ gid }}" style="display:none"{% endif %}>
+  <td><input type="checkbox" class="form-check-input tx-check" value="{{ tx.id }}" onchange="updateBulkBtn()"></td>
+  <td class="text-secondary small{% if item %} ps-4{% endif %}">{{ tx.date }}</td>
   <td>
-    {% if t.type == '지출' %}
-      <span class="badge bg-danger-subtle text-danger-emphasis">지출</span>
+    {% if tx.type == '지출' %}
+      <span class="badge bg-danger-subtle text-danger-emphasis">{{ cat_label('지출') }}</span>
     {% else %}
-      <span class="badge bg-success-subtle text-success-emphasis">수입</span>
+      <span class="badge bg-success-subtle text-success-emphasis">{{ cat_label('수입') }}</span>
     {% endif %}
   </td>
   <td class="small">
-    {{ t.minor or '' }}
-    {% if t.source == 'amazon' %}<span class="badge bg-warning text-dark ms-1 small">amz</span>{% endif %}
-    {% if t.source == 'paypay' %}<span class="badge bg-primary ms-1 small">pay</span>{% endif %}
-    {% if t.source == 'receipt' and not item %}<span class="badge bg-secondary ms-1 small">rcpt</span>{% endif %}
-    {% if t.source == 'mcdonald' %}<span class="badge bg-danger ms-1 small">mcd</span>{% endif %}
-    {% if t.source == 'email' %}<span class="badge bg-info text-dark ms-1 small">AI</span>{% endif %}
+    {{ tx.minor or '' }}
+    {% if tx.source == 'amazon' %}<span class="badge bg-warning text-dark ms-1 small">amz</span>{% endif %}
+    {% if tx.source == 'paypay' %}<span class="badge bg-primary ms-1 small">pay</span>{% endif %}
+    {% if tx.source == 'receipt' and not item %}<span class="badge bg-secondary ms-1 small">rcpt</span>{% endif %}
+    {% if tx.source == 'mcdonald' %}<span class="badge bg-danger ms-1 small">mcd</span>{% endif %}
+    {% if tx.source == 'email' %}<span class="badge bg-info text-dark ms-1 small">AI</span>{% endif %}
   </td>
   <td>
-    {% if not item %}<div class="small fw-semibold">{{ t.shop or '' }}</div>{% endif %}
+    {% if not item %}<div class="small fw-semibold">{{ tx.shop or '' }}</div>{% endif %}
     <div class="text-secondary" style="font-size:0.75rem">
-      {{ t.item or '' }}
-      {% if t.receipt_img %}
-        <a href="#" onclick="showReceipt('/{{ t.receipt_img }}'); return false" class="ms-1 text-info" title="영수증 크게 보기"><i class="bi bi-image"></i></a>
+      {{ tx.item or '' }}
+      {% if tx.receipt_img %}
+        <a href="#" onclick="showReceipt('/{{ tx.receipt_img }}'); return false" class="ms-1 text-info" title="{{ t('tx.view_receipt_large') }}"><i class="bi bi-image"></i></a>
       {% endif %}
     </div>
   </td>
-  <td class="text-end {% if (t.jpy_amount or 0) < 0 %}text-danger{% else %}text-success{% endif %}">
-    {{ "¥{:,.0f}".format(t.jpy_amount or 0) }}
+  <td class="text-end {% if (tx.jpy_amount or 0) < 0 %}text-danger{% else %}text-success{% endif %}">
+    {{ "¥{:,.0f}".format(tx.jpy_amount or 0) }}
   </td>
-  <td class="text-end small text-secondary">{{ "¥{:,.0f}".format(t.jpy_balance or 0) }}</td>
-  <td class="text-end small text-secondary">{{ "₩{:,.0f}".format(t.krw_balance or 0) }}</td>
+  <td class="text-end small text-secondary">{{ "¥{:,.0f}".format(tx.jpy_balance or 0) }}</td>
+  <td class="text-end small text-secondary">{{ "₩{:,.0f}".format(tx.krw_balance or 0) }}</td>
   <td>
-    <button class="btn btn-link btn-sm p-0 text-secondary" onclick="openEditModal({{ t.id }})"><i class="bi bi-pencil"></i></button>
-    <button class="btn btn-link btn-sm p-0 text-danger ms-1" onclick="deleteTx({{ t.id }})"><i class="bi bi-trash"></i></button>
+    <button class="btn btn-link btn-sm p-0 text-secondary" onclick="openEditModal({{ tx.id }})"><i class="bi bi-pencil"></i></button>
+    <button class="btn btn-link btn-sm p-0 text-danger ms-1" onclick="deleteTx({{ tx.id }})"><i class="bi bi-trash"></i></button>
   </td>
 </tr>
 {% endmacro %}
@@ -150,8 +150,8 @@
          onclick="toggleMonth('{{ ym }}')">
       <span class="fw-bold text-white">{{ ym }}</span>
       <span class="text-secondary small">
-        지출 <span class="text-danger">{{ "¥{:,.0f}".format(g.expense) }}</span>
-        &nbsp;수입 <span class="text-success">{{ "¥{:,.0f}".format(g.income) }}</span>
+        {{ cat_label('지출') }} <span class="text-danger">{{ "¥{:,.0f}".format(g.expense) }}</span>
+        &nbsp;{{ cat_label('수입') }} <span class="text-success">{{ "¥{:,.0f}".format(g.income) }}</span>
       </span>
       <i class="bi bi-chevron-down" id="chevron-{{ ym }}"></i>
     </div>
@@ -161,13 +161,13 @@
         <thead class="text-secondary">
           <tr>
             <th style="width:28px"><input type="checkbox" class="form-check-input" onchange="toggleMonthCheck('{{ ym }}', this)"></th>
-            <th>날짜</th>
-            <th>구분</th>
-            <th>소분류</th>
-            <th>구입처/품목</th>
-            <th class="text-end">엔화</th>
-            <th class="text-end">잔고(¥)</th>
-            <th class="text-end">잔고(₩)</th>
+            <th>{{ t('common.date') }}</th>
+            <th>{{ t('common.type') }}</th>
+            <th>{{ t('tx.minor') }}</th>
+            <th>{{ t('tx.shop_item') }}</th>
+            <th class="text-end">{{ t('tx.jpy') }}</th>
+            <th class="text-end">{{ t('tx.balance_jpy') }}</th>
+            <th class="text-end">{{ t('tx.balance_krw') }}</th>
             <th style="width:60px"></th>
           </tr>
         </thead>
@@ -188,25 +188,25 @@
               </td>
               <td class="text-secondary small">{{ u.date }}</td>
               <td>
-                {% if u.total < 0 %}<span class="badge bg-danger-subtle text-danger-emphasis">지출</span>
-                {% else %}<span class="badge bg-success-subtle text-success-emphasis">수입</span>{% endif %}
+                {% if u.total < 0 %}<span class="badge bg-danger-subtle text-danger-emphasis">{{ cat_label('지출') }}</span>
+                {% else %}<span class="badge bg-success-subtle text-success-emphasis">{{ cat_label('수입') }}</span>{% endif %}
               </td>
-              <td class="small"><span class="badge bg-secondary">📷 영수증</span></td>
+              <td class="small"><span class="badge bg-secondary">📷 {{ t('tx.receipt') }}</span></td>
               <td>
                 <div class="small fw-semibold d-flex align-items-center gap-2">
                   {% if not single %}<i class="bi bi-chevron-right" id="gchev-{{ u.gid }}"></i>{% endif %}
                   {% if u.thumb %}
                   <img src="/{{ u.thumb }}" class="receipt-thumb"
                        onclick="event.stopPropagation(); showReceipt('/{{ u.thumb }}')"
-                       title="클릭하면 크게 보기"
+                       title="{{ t('tx.click_to_enlarge') }}"
                        style="height:40px;width:32px;object-fit:cover;border-radius:4px;cursor:zoom-in;border:1px solid #555"
                        onerror="this.style.display='none'">
                   {% endif %}
-                  <span>{{ u.shop or '(가게 없음)' }}</span>
+                  <span>{{ u.shop or t('tx.no_shop') }}</span>
                   {% if single %}
                   <span class="text-secondary fw-normal" style="font-size:0.8rem">— {{ o.item or '' }}</span>
                   {% else %}
-                  <span class="text-secondary fw-normal">· {{ u.rows|length }}개 품목</span>
+                  <span class="text-secondary fw-normal">· {{ u.rows|length }}{{ t('tx.items_suffix') }}</span>
                   {% endif %}
                 </div>
               </td>
@@ -222,7 +222,7 @@
                 {% endif %}
               </td>
             </tr>
-            {% if not single %}{% for t in u.rows %}{{ tx_row(t, item=true, gid=u.gid) }}{% endfor %}{% endif %}
+            {% if not single %}{% for tx in u.rows %}{{ tx_row(tx, item=true, gid=u.gid) }}{% endfor %}{% endif %}
             {% endif %}
           {% endfor %}
         </tbody>
@@ -231,7 +231,7 @@
   </div>
   {% endfor %}
 {% else %}
-  <div class="text-center text-secondary py-5">내역이 없습니다.</div>
+  <div class="text-center text-secondary py-5">{{ t('tx.no_transactions') }}</div>
 {% endif %}
 
 
@@ -240,22 +240,22 @@
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content bg-dark text-white border-secondary">
       <div class="modal-header border-secondary">
-        <h5 class="modal-title">시작 잔고 설정</h5>
+        <h5 class="modal-title">{{ t('tx.set_starting_balance') }}</h5>
       </div>
       <div class="modal-body">
-        <p class="small text-secondary mb-3">현재 가진 잔고를 입력하세요. 나중에 <b>설정</b>에서 바꿀 수 있어요.</p>
+        <p class="small text-secondary mb-3">{{ t('tx.balance_hint_before') }}<b>{{ t('nav.settings') }}</b>{{ t('tx.balance_hint_after') }}</p>
         <div class="mb-3">
-          <label class="form-label small">엔화 초기 잔고 (¥)</label>
+          <label class="form-label small">{{ t('tx.initial_balance_jpy') }}</label>
           <input type="number" id="setup-jpy" class="form-control bg-dark text-white border-secondary" value="{{ initial_jpy }}">
         </div>
         <div class="mb-2">
-          <label class="form-label small">원화 초기 잔고 (₩)</label>
+          <label class="form-label small">{{ t('tx.initial_balance_krw') }}</label>
           <input type="number" id="setup-krw" class="form-control bg-dark text-white border-secondary" value="{{ initial_krw }}">
         </div>
       </div>
       <div class="modal-footer border-secondary">
-        <button class="btn btn-outline-secondary btn-sm" onclick="finishSetup(true)">나중에</button>
-        <button class="btn btn-primary btn-sm" onclick="finishSetup(false)">저장</button>
+        <button class="btn btn-outline-secondary btn-sm" onclick="finishSetup(true)">{{ t('tx.later') }}</button>
+        <button class="btn btn-primary btn-sm" onclick="finishSetup(false)">{{ t('common.save') }}</button>
       </div>
     </div>
   </div>
@@ -267,69 +267,69 @@
   <div class="modal-dialog modal-lg">
     <div class="modal-content bg-dark">
       <div class="modal-header border-secondary">
-        <h5 class="modal-title" id="tx-modal-title">거래 추가</h5>
+        <h5 class="modal-title" id="tx-modal-title">{{ t('tx.add_transaction') }}</h5>
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
         <input type="hidden" id="tx-id">
         <div class="row g-2">
           <div class="col-md-3">
-            <label class="form-label small">날짜</label>
+            <label class="form-label small">{{ t('common.date') }}</label>
             <input type="date" id="tx-date" class="form-control form-control-sm bg-dark text-white border-secondary">
           </div>
           <div class="col-md-2">
-            <label class="form-label small">구분</label>
+            <label class="form-label small">{{ t('common.type') }}</label>
             <select id="tx-type" class="form-select form-select-sm bg-dark text-white border-secondary" onchange="loadCategoryOptions()">
-              <option>지출</option><option>수입</option>
+              <option value="지출">{{ cat_label('지출') }}</option><option value="수입">{{ cat_label('수입') }}</option>
             </select>
           </div>
           <div class="col-md-3">
-            <label class="form-label small">대분류</label>
+            <label class="form-label small">{{ t('tx.major') }}</label>
             <select id="tx-major" class="form-select form-select-sm bg-dark text-white border-secondary" onchange="loadMinorOptions()">
               <option value=""></option>
             </select>
           </div>
           <div class="col-md-2">
-            <label class="form-label small">소분류</label>
+            <label class="form-label small">{{ t('tx.minor') }}</label>
             <select id="tx-minor" class="form-select form-select-sm bg-dark text-white border-secondary" onchange="loadSubOptions()">
               <option value=""></option>
             </select>
           </div>
           <div class="col-md-2">
-            <label class="form-label small">카테고리</label>
+            <label class="form-label small">{{ t('common.category') }}</label>
             <select id="tx-category" class="form-select form-select-sm bg-dark text-white border-secondary">
               <option value=""></option>
             </select>
           </div>
           <div class="col-md-4">
-            <label class="form-label small">구입처</label>
+            <label class="form-label small">{{ t('common.shop') }}</label>
             <input type="text" id="tx-shop" class="form-control form-control-sm bg-dark text-white border-secondary">
           </div>
           <div class="col-md-8">
-            <label class="form-label small">품목명</label>
+            <label class="form-label small">{{ t('tx.item_name') }}</label>
             <input type="text" id="tx-item" class="form-control form-control-sm bg-dark text-white border-secondary">
           </div>
           <div class="col-md-3">
-            <label class="form-label small">엔화가격</label>
+            <label class="form-label small">{{ t('tx.jpy_price') }}</label>
             <input type="number" id="tx-jpy" class="form-control form-control-sm bg-dark text-white border-secondary">
           </div>
           <div class="col-md-3">
-            <label class="form-label small">원화가격</label>
+            <label class="form-label small">{{ t('tx.krw_price') }}</label>
             <input type="number" id="tx-krw" class="form-control form-control-sm bg-dark text-white border-secondary">
           </div>
           <div class="col-md-3">
-            <label class="form-label small">환율 (100엔, 참고용)</label>
+            <label class="form-label small">{{ t('tx.rate_ref') }}</label>
             <input type="number" id="tx-rate" class="form-control form-control-sm bg-dark text-white border-secondary" step="0.01">
           </div>
           <div class="col-md-3">
-            <label class="form-label small">비고</label>
+            <label class="form-label small">{{ t('common.note') }}</label>
             <input type="text" id="tx-note" class="form-control form-control-sm bg-dark text-white border-secondary">
           </div>
         </div>
       </div>
       <div class="modal-footer border-secondary">
-        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">취소</button>
-        <button type="button" class="btn btn-primary btn-sm" onclick="saveTx()">저장</button>
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">{{ t('common.cancel') }}</button>
+        <button type="button" class="btn btn-primary btn-sm" onclick="saveTx()">{{ t('common.save') }}</button>
       </div>
     </div>
   </div>
@@ -339,7 +339,7 @@
 <div class="position-fixed bottom-0 end-0 p-3" style="z-index:9999">
   <div id="toast" class="toast align-items-center text-bg-dark border-secondary" role="alert">
     <div class="d-flex">
-      <div class="toast-body" id="toast-msg">처리 중...</div>
+      <div class="toast-body" id="toast-msg">{{ t('tx.processing') }}</div>
       <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
     </div>
   </div>
@@ -370,7 +370,7 @@ function dismissGmailReminder() {
     .then(() => {
       const el = document.getElementById('gmail-reminder');
       if (el) el.style.display = 'none';
-      alert('숨겼습니다. 나중에 설정 → Gmail 연동에서 언제든 켤 수 있어요.');
+      alert({{ t('tx.gmail_hidden_notice')|tojson }});
     });
 }
 
@@ -425,19 +425,19 @@ function updateBulkBtn() {
   const checked = document.querySelectorAll('.tx-check:checked').length;
   const btn = document.getElementById('bulk-delete-btn');
   btn.style.display = checked > 0 ? '' : 'none';
-  btn.textContent = `선택삭제 (${checked})`;
+  btn.textContent = {{ t('tx.delete_selected')|tojson }} + ` (${checked})`;
 }
 
 function bulkDelete() {
   const ids = [...document.querySelectorAll('.tx-check:checked')].map(cb => parseInt(cb.value));
-  if (!ids.length || !confirm(`${ids.length}건 삭제하시겠습니까?`)) return;
+  if (!ids.length || !confirm({{ t('tx.confirm_delete_prefix')|tojson }} + ids.length + {{ t('tx.confirm_delete_suffix')|tojson }})) return;
   fetch('/api/transactions/bulk-delete', {
     method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ids})
   }).then(() => location.reload());
 }
 
 function deleteTx(id) {
-  if (!confirm('삭제하시겠습니까?')) return;
+  if (!confirm({{ t('tx.confirm_delete_one')|tojson }})) return;
   fetch(`/api/transactions/${id}`, {method:'DELETE'}).then(() => {
     document.getElementById(`row-${id}`)?.remove();
   });
@@ -447,7 +447,7 @@ function loadCategoryOptions() {
   const type = document.getElementById('tx-type').value;
   const majors = [...new Set(allCategories.filter(c => c.type === type).map(c => c.major))];
   const sel = document.getElementById('tx-major');
-  sel.innerHTML = '<option value=""></option>' + majors.map(m => `<option>${m}</option>`).join('');
+  sel.innerHTML = '<option value=""></option>' + majors.map(m => `<option value="${m}">${catLabel(m)}</option>`).join('');
   loadMinorOptions();
 }
 
@@ -456,7 +456,7 @@ function loadMinorOptions() {
   const major = document.getElementById('tx-major').value;
   const minors = [...new Set(allCategories.filter(c => c.type===type && c.major===major).map(c => c.minor))];
   const sel = document.getElementById('tx-minor');
-  sel.innerHTML = '<option value=""></option>' + minors.map(m => `<option>${m}</option>`).join('');
+  sel.innerHTML = '<option value=""></option>' + minors.map(m => `<option value="${m}">${catLabel(m)}</option>`).join('');
   loadSubOptions();
 }
 
@@ -466,11 +466,11 @@ function loadSubOptions() {
   const minor = document.getElementById('tx-minor').value;
   const subs  = allCategories.filter(c => c.type===type && c.major===major && c.minor===minor).map(c => c.sub);
   const sel   = document.getElementById('tx-category');
-  sel.innerHTML = '<option value=""></option>' + subs.map(s => `<option>${s}</option>`).join('');
+  sel.innerHTML = '<option value=""></option>' + subs.map(s => `<option value="${s}">${catLabel(s)}</option>`).join('');
 }
 
 function openAddModal() {
-  document.getElementById('tx-modal-title').textContent = '거래 추가';
+  document.getElementById('tx-modal-title').textContent = {{ t('tx.add_transaction')|tojson }};
   document.getElementById('tx-id').value = '';
   document.getElementById('tx-date').value = new Date().toISOString().slice(0,10);
   ['tx-type','tx-major','tx-minor','tx-category','tx-shop','tx-item','tx-note'].forEach(id => {
@@ -509,7 +509,7 @@ function openEditModal(id) {
 }
 
 function _fillEditModal(t) {
-  document.getElementById('tx-modal-title').textContent = '거래 수정';
+  document.getElementById('tx-modal-title').textContent = {{ t('tx.edit_transaction')|tojson }};
   document.getElementById('tx-id').value       = t.id;
   document.getElementById('tx-date').value     = t.date;
   document.getElementById('tx-type').value     = t.type || '지출';
@@ -556,7 +556,7 @@ function saveTx() {
 function uploadReceipts(input) {
   const fd = new FormData();
   [...input.files].forEach(f => fd.append('images', f));
-  showToast('사진 확인 중...');
+  showToast({{ t('tx.checking_photos')|tojson }});
   fetch('/api/receipts/stage', {method:'POST', body: fd})
     .then(r => r.json())
     .then(d => {
@@ -568,26 +568,26 @@ function uploadReceipts(input) {
 function importPayPay(input) {
   const fd = new FormData();
   fd.append('csv', input.files[0]);
-  showToast('PayPay 임포트 중...');
+  showToast({{ t('tx.importing_paypay')|tojson }});
   fetch('/api/paypay/import', {method:'POST', body:fd})
     .then(r => r.json())
     .then(d => { showToast(d.message || d.error); setTimeout(() => location.reload(), 1500); });
 }
 
 async function syncAllMail() {
-  showToast('메일 동기화 중... (AI가 주문/영수증 메일을 분석합니다. 시간이 걸릴 수 있어요)');
+  showToast({{ t('tx.syncing_mail')|tojson }});
   try {
     const d = await fetch('/api/email/sync', {method:'POST'}).then(r => r.json());
-    showToast(d.message || d.error || '완료');
+    showToast(d.message || d.error || {{ t('tx.done')|tojson }});
   } catch(e) {
-    showToast('메일 동기화 오류');
+    showToast({{ t('tx.mail_sync_error')|tojson }});
   }
   setTimeout(() => location.reload(), 2000);
 }
 
 function fetchRates() {
   const now = new Date();
-  showToast('환율 업데이트 중...');
+  showToast({{ t('tx.updating_rates')|tojson }});
   fetch('/api/exchange-rates/fetch', {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({year: now.getFullYear(), month: now.getMonth()+1})

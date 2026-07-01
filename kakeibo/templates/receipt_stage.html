@@ -2,14 +2,14 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
   <div>
-    <h5 class="mb-0">분석할 사진 확인</h5>
-    <div class="text-secondary small">체크된 사진만 AI 분석합니다. <span class="text-warning">중복</span>(이미 추가한 파일명)은 자동으로 체크 해제됩니다.</div>
+    <h5 class="mb-0">{{ t('receipt.review_photos') }}</h5>
+    <div class="text-secondary small">{{ t('receipt.only_checked_analyzed') }} <span class="text-warning">{{ t('receipt.duplicate') }}</span>{{ t('receipt.dup_auto_unchecked') }}</div>
   </div>
   <div class="d-flex gap-2">
-    <button class="btn btn-secondary btn-sm" onclick="location.href='/transactions'">취소</button>
-    <button class="btn btn-outline-light btn-sm" onclick="toggleAll(true)">전체선택</button>
-    <button class="btn btn-outline-light btn-sm" onclick="toggleAll(false)">전체해제</button>
-    <button class="btn btn-success btn-sm" onclick="analyze()"><i class="bi bi-robot"></i> 분석 시작</button>
+    <button class="btn btn-secondary btn-sm" onclick="location.href='/transactions'">{{ t('common.cancel') }}</button>
+    <button class="btn btn-outline-light btn-sm" onclick="toggleAll(true)">{{ t('receipt.select_all') }}</button>
+    <button class="btn btn-outline-light btn-sm" onclick="toggleAll(false)">{{ t('receipt.deselect_all') }}</button>
+    <button class="btn btn-success btn-sm" onclick="analyze()"><i class="bi bi-robot"></i> {{ t('receipt.start_analysis') }}</button>
   </div>
 </div>
 
@@ -20,11 +20,11 @@
       <div class="position-relative">
         <img src="/temp/{{ session_id }}/{{ s.saved|urlencode }}"
              onclick="showReceipt('/temp/{{ session_id }}/{{ s.saved|urlencode }}')"
-             title="클릭하면 크게 보기"
+             title="{{ t('receipt.click_to_enlarge') }}"
              class="card-img-top" style="height:130px;object-fit:cover;border-radius:4px 4px 0 0;cursor:zoom-in"
              onerror="this.style.display='none'">
         {% if s.dup %}
-        <span class="badge bg-warning text-dark position-absolute top-0 end-0 m-1">중복</span>
+        <span class="badge bg-warning text-dark position-absolute top-0 end-0 m-1">{{ t('receipt.duplicate') }}</span>
         {% endif %}
       </div>
       <div class="card-body p-2">
@@ -35,7 +35,7 @@
           <label class="form-check-label small text-truncate d-block" for="chk-{{ loop.index0 }}"
                  title="{{ s.name }}" style="max-width:100%">{{ s.name }}</label>
         </div>
-        {% if s.dup %}<div class="text-warning" style="font-size:0.7rem">이미 추가됨</div>{% endif %}
+        {% if s.dup %}<div class="text-warning" style="font-size:0.7rem">{{ t('receipt.already_added') }}</div>{% endif %}
       </div>
     </div>
   </div>
@@ -54,17 +54,17 @@ function toggleAll(v) {
 
 function analyze() {
   const selected = [...document.querySelectorAll('.stage-check:checked')].map(c => c.value);
-  if (!selected.length) { alert('분석할 사진을 하나 이상 선택하세요'); return; }
+  if (!selected.length) { alert({{ t('receipt.select_one')|tojson }}); return; }
   const btn = event.target.closest('button');
-  if (btn) { btn.disabled = true; btn.innerHTML = 'AI 분석 중...'; }
+  if (btn) { btn.disabled = true; btn.innerHTML = {{ t('receipt.analyzing')|tojson }}; }
   fetch('/api/receipts/analyze', {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({session_id: sessionId, selected})
   }).then(r => r.json()).then(d => {
-    if (d.error) { alert(d.error); if (btn){btn.disabled=false; btn.textContent='분석 시작';} return; }
+    if (d.error) { alert(d.error); if (btn){btn.disabled=false; btn.textContent={{ t('receipt.start_analysis')|tojson }};} return; }
     if (d.quota_exceeded) {
       alert(d.message);   // Quota exceeded notice (remaining photos are not analyzed)
-      if (!d.count) { if (btn){btn.disabled=false; btn.textContent='분석 시작';} return; }
+      if (!d.count) { if (btn){btn.disabled=false; btn.textContent={{ t('receipt.start_analysis')|tojson }};} return; }
     }
     window.location.href = `/receipt-review/${sessionId}`;
   });

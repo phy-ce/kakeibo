@@ -4,12 +4,12 @@
 <div class="d-flex gap-2 align-items-center mb-3">
   <select id="stat-year" class="form-select form-select-sm w-auto bg-dark text-white border-secondary" onchange="loadStats()">
     {% for y in range(2024, 2028) %}
-    <option value="{{ y }}" {% if y==year %}selected{% endif %}>{{ y }}년</option>
+    <option value="{{ y }}" {% if y==year %}selected{% endif %}>{{ y }}{{ t('stats.year_suffix') }}</option>
     {% endfor %}
   </select>
   <select id="stat-month" class="form-select form-select-sm w-auto bg-dark text-white border-secondary" onchange="loadStats()">
     {% for m in range(1,13) %}
-    <option value="{{ m }}" {% if m==month %}selected{% endif %}>{{ m }}월</option>
+    <option value="{{ m }}" {% if m==month %}selected{% endif %}>{{ m }}{{ t('stats.month_suffix') }}</option>
     {% endfor %}
   </select>
 </div>
@@ -18,13 +18,13 @@
 <div class="row g-3 mb-3">
   <div class="col-lg-8">
     <div class="card bg-dark border-secondary h-100">
-      <div class="card-header border-secondary small text-secondary">월별 수입/지출</div>
+      <div class="card-header border-secondary small text-secondary">{{ t('stats.monthly_income_expense') }}</div>
       <div class="card-body"><canvas id="monthly-chart" height="120"></canvas></div>
     </div>
   </div>
   <div class="col-lg-4">
     <div class="card bg-dark border-secondary h-100">
-      <div class="card-header border-secondary small text-secondary">카테고리별 지출</div>
+      <div class="card-header border-secondary small text-secondary">{{ t('stats.expense_by_category') }}</div>
       <div class="card-body"><canvas id="cat-chart"></canvas></div>
     </div>
   </div>
@@ -34,14 +34,14 @@
 <div class="row g-3">
   <div class="col-lg-4">
     <div class="card bg-dark border-secondary">
-      <div class="card-header border-secondary small text-secondary">이번달 요약</div>
-      <div class="card-body" id="summary-box">로딩 중...</div>
+      <div class="card-header border-secondary small text-secondary">{{ t('stats.this_month_summary') }}</div>
+      <div class="card-body" id="summary-box">{{ t('common.loading') }}</div>
     </div>
   </div>
   <div class="col-lg-8">
     <div class="card bg-dark border-secondary">
-      <div class="card-header border-secondary small text-secondary">예산 vs 실제 지출</div>
-      <div class="card-body p-2" id="budget-vs-actual">로딩 중...</div>
+      <div class="card-header border-secondary small text-secondary">{{ t('stats.budget_vs_actual') }}</div>
+      <div class="card-body p-2" id="budget-vs-actual">{{ t('common.loading') }}</div>
     </div>
   </div>
 </div>
@@ -75,8 +75,8 @@ function renderMonthly(data) {
     data: {
       labels,
       datasets: [
-        {label:'지출', data: expenses, backgroundColor:'rgba(220,53,69,0.7)'},
-        {label:'수입', data: incomes,  backgroundColor:'rgba(25,135,84,0.7)'},
+        {label: {{ t('common.expense')|tojson }}, data: expenses, backgroundColor:'rgba(220,53,69,0.7)'},
+        {label: {{ t('common.income')|tojson }}, data: incomes,  backgroundColor:'rgba(25,135,84,0.7)'},
       ]
     },
     options: {
@@ -91,7 +91,7 @@ function renderMonthly(data) {
 }
 
 function renderCat(data) {
-  const labels = data.map(d => d.minor || '기타');
+  const labels = data.map(d => d.minor || {{ t('stats.other')|tojson }});
   const values = data.map(d => Math.abs(d.total || 0));
   if (catChart) catChart.destroy();
   catChart = new Chart(document.getElementById('cat-chart'), {
@@ -113,16 +113,16 @@ function renderSummary(monthly, month) {
   const income  = row ? (row.income || 0) : 0;
   document.getElementById('summary-box').innerHTML = `
     <div class="d-flex justify-content-between mb-2">
-      <span class="text-secondary">수입</span>
+      <span class="text-secondary">{{ t('common.income') }}</span>
       <span class="text-success fw-bold">¥${income.toLocaleString()}</span>
     </div>
     <div class="d-flex justify-content-between mb-2">
-      <span class="text-secondary">지출</span>
+      <span class="text-secondary">{{ t('common.expense') }}</span>
       <span class="text-danger fw-bold">¥${expense.toLocaleString()}</span>
     </div>
     <hr class="border-secondary">
     <div class="d-flex justify-content-between">
-      <span class="text-secondary">순수지</span>
+      <span class="text-secondary">{{ t('stats.net') }}</span>
       <span class="fw-bold ${income - expense >= 0 ? 'text-success' : 'text-danger'}">
         ¥${(income - expense).toLocaleString()}
       </span>
@@ -134,7 +134,7 @@ function renderBudgetVsActual(budgets, actuals) {
   actuals.forEach(a => { actualsMap[a.minor] = Math.abs(a.total || 0); });
 
   if (!budgets.length) {
-    document.getElementById('budget-vs-actual').innerHTML = '<span class="text-secondary small">예산이 설정되지 않았습니다.</span>';
+    document.getElementById('budget-vs-actual').innerHTML = '<span class="text-secondary small">{{ t('stats.no_budget') }}</span>';
     return;
   }
 

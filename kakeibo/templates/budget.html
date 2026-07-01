@@ -4,30 +4,30 @@
 <div class="d-flex gap-2 align-items-center mb-3">
   <select id="bud-year" class="form-select form-select-sm w-auto bg-dark text-white border-secondary" onchange="goMonth()">
     {% for y in range(2024, 2028) %}
-    <option value="{{ y }}" {% if y==year %}selected{% endif %}>{{ y }}년</option>
+    <option value="{{ y }}" {% if y==year %}selected{% endif %}>{{ y }}{{ t('budget.year_suffix') }}</option>
     {% endfor %}
   </select>
   <select id="bud-month" class="form-select form-select-sm w-auto bg-dark text-white border-secondary" onchange="goMonth()">
     {% for m in range(1,13) %}
-    <option value="{{ m }}" {% if m==month %}selected{% endif %}>{{ m }}월</option>
+    <option value="{{ m }}" {% if m==month %}selected{% endif %}>{{ m }}{{ t('budget.month_suffix') }}</option>
     {% endfor %}
   </select>
   <button class="btn btn-sm btn-success ms-2" onclick="openAddBudget()">
-    <i class="bi bi-plus"></i> 예산 항목 추가
+    <i class="bi bi-plus"></i> {{ t('budget.add_item') }}
   </button>
   <button class="btn btn-sm btn-outline-secondary" onclick="copyPrevMonth()">
-    <i class="bi bi-arrow-clockwise"></i> 지난달 복사
+    <i class="bi bi-arrow-clockwise"></i> {{ t('budget.copy_prev') }}
   </button>
 </div>
 
 <table class="table table-dark table-sm align-middle">
   <thead class="text-secondary">
     <tr>
-      <th>항목명</th>
-      <th>매칭조건</th>
-      <th class="text-end">예산</th>
-      <th class="text-end">실제 지출</th>
-      <th class="text-end">잔여</th>
+      <th>{{ t('budget.item_name') }}</th>
+      <th>{{ t('budget.match_condition') }}</th>
+      <th class="text-end">{{ t('budget.budget') }}</th>
+      <th class="text-end">{{ t('budget.actual_spent') }}</th>
+      <th class="text-end">{{ t('budget.remaining') }}</th>
       <th></th>
     </tr>
   </thead>
@@ -36,13 +36,13 @@
     <tr {% if b.exceeded %}class="table-danger"{% endif %}>
       <td class="fw-semibold">{{ b.name }}</td>
       <td class="small text-secondary">
-        {% if b.match_shop  %}<span class="badge bg-secondary me-1">구입처: {{ b.match_shop }}</span>{% endif %}
-        {% if b.match_item  %}<span class="badge bg-secondary me-1">품목: {{ b.match_item }}</span>{% endif %}
-        {% if b.match_major %}<span class="badge bg-info text-dark me-1">대: {{ b.match_major }}</span>{% endif %}
-        {% if b.match_minor %}<span class="badge bg-info text-dark me-1">소: {{ b.match_minor }}</span>{% endif %}
-        {% if b.match_sub   %}<span class="badge bg-info text-dark me-1">세부: {{ b.match_sub }}</span>{% endif %}
+        {% if b.match_shop  %}<span class="badge bg-secondary me-1">{{ t('common.shop') }}: {{ b.match_shop }}</span>{% endif %}
+        {% if b.match_item  %}<span class="badge bg-secondary me-1">{{ t('common.item') }}: {{ b.match_item }}</span>{% endif %}
+        {% if b.match_major %}<span class="badge bg-info text-dark me-1">{{ t('budget.major_short') }}: {{ b.match_major }}</span>{% endif %}
+        {% if b.match_minor %}<span class="badge bg-info text-dark me-1">{{ t('budget.minor_short') }}: {{ b.match_minor }}</span>{% endif %}
+        {% if b.match_sub   %}<span class="badge bg-info text-dark me-1">{{ t('budget.sub') }}: {{ b.match_sub }}</span>{% endif %}
         {% if not (b.match_shop or b.match_item or b.match_major or b.match_minor or b.match_sub) %}
-        <span class="text-danger">매칭조건 없음</span>
+        <span class="text-danger">{{ t('budget.no_match') }}</span>
         {% endif %}
       </td>
       <td class="text-end">¥{{ "{:,.0f}".format(b.amount) }}</td>
@@ -62,13 +62,13 @@
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="6" class="text-center text-secondary">예산 항목이 없습니다.</td></tr>
+    <tr><td colspan="6" class="text-center text-secondary">{{ t('budget.no_items') }}</td></tr>
     {% endfor %}
   </tbody>
   {% if budget_data %}
   <tfoot>
     <tr class="border-top fw-bold {% if totals.exceeded %}table-danger{% endif %}">
-      <td colspan="2" class="text-end">합계</td>
+      <td colspan="2" class="text-end">{{ t('budget.total') }}</td>
       <td class="text-end">¥{{ "{:,.0f}".format(totals.budget) }}</td>
       <td class="text-end {% if totals.exceeded %}text-danger{% endif %}">¥{{ "{:,.0f}".format(totals.actual) }}</td>
       <td class="text-end {% if totals.exceeded %}text-danger{% else %}text-secondary{% endif %}">¥{{ "{:,.0f}".format(totals.remain) }}</td>
@@ -83,40 +83,40 @@
   <div class="modal-dialog">
     <div class="modal-content bg-dark">
       <div class="modal-header border-secondary">
-        <h5 class="modal-title" id="b-modal-title">예산 항목 추가</h5>
+        <h5 class="modal-title" id="b-modal-title">{{ t('budget.add_item') }}</h5>
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
         <input type="hidden" id="b-id">
         <div class="mb-2">
-          <label class="form-label small">항목명 <span class="text-danger">*</span></label>
-          <input type="text" id="b-name" class="form-control form-control-sm bg-dark text-white border-secondary" placeholder="예: 넷플릭스, iCloud, 도시가스">
+          <label class="form-label small">{{ t('budget.item_name') }} <span class="text-danger">*</span></label>
+          <input type="text" id="b-name" class="form-control form-control-sm bg-dark text-white border-secondary" placeholder="{{ t('budget.name_placeholder') }}">
         </div>
         <div class="mb-2">
-          <label class="form-label small">구입처 매칭 <span class="text-secondary">(부분일치)</span></label>
-          <input type="text" id="b-match-shop" class="form-control form-control-sm bg-dark text-white border-secondary" placeholder="예: 東京ガス">
+          <label class="form-label small">{{ t('budget.shop_match') }} <span class="text-secondary">{{ t('budget.partial_match') }}</span></label>
+          <input type="text" id="b-match-shop" class="form-control form-control-sm bg-dark text-white border-secondary" placeholder="{{ t('budget.shop_placeholder') }}">
         </div>
         <div class="mb-2">
-          <label class="form-label small">품목 매칭 <span class="text-secondary">(부분일치, 선택)</span></label>
-          <input type="text" id="b-match-item" class="form-control form-control-sm bg-dark text-white border-secondary" placeholder="예: iCloud+ 200GB">
+          <label class="form-label small">{{ t('budget.item_match') }} <span class="text-secondary">{{ t('budget.partial_optional') }}</span></label>
+          <input type="text" id="b-match-item" class="form-control form-control-sm bg-dark text-white border-secondary" placeholder="{{ t('budget.item_placeholder') }}">
         </div>
         <hr class="border-secondary">
-        <div class="text-secondary small mb-2">카테고리 매칭 (선택, 정확히 일치)</div>
+        <div class="text-secondary small mb-2">{{ t('budget.category_match') }}</div>
         <div class="row g-2 mb-2">
           <div class="col-4">
-            <label class="form-label small">대분류</label>
+            <label class="form-label small">{{ t('budget.major') }}</label>
             <select id="b-match-major" class="form-select form-select-sm bg-dark text-white border-secondary" onchange="loadMatchMinor()">
               <option value=""></option>
             </select>
           </div>
           <div class="col-4">
-            <label class="form-label small">소분류</label>
+            <label class="form-label small">{{ t('budget.minor') }}</label>
             <select id="b-match-minor" class="form-select form-select-sm bg-dark text-white border-secondary" onchange="loadMatchSub()">
               <option value=""></option>
             </select>
           </div>
           <div class="col-4">
-            <label class="form-label small">세부</label>
+            <label class="form-label small">{{ t('budget.sub') }}</label>
             <select id="b-match-sub" class="form-select form-select-sm bg-dark text-white border-secondary">
               <option value=""></option>
             </select>
@@ -124,16 +124,16 @@
         </div>
         <hr class="border-secondary">
         <div class="mb-2">
-          <label class="form-label small">예산 (엔화) <span class="text-danger">*</span></label>
-          <input type="number" id="b-amount" class="form-control form-control-sm bg-dark text-white border-secondary" placeholder="예: 3000">
+          <label class="form-label small">{{ t('budget.budget_jpy') }} <span class="text-danger">*</span></label>
+          <input type="number" id="b-amount" class="form-control form-control-sm bg-dark text-white border-secondary" placeholder="{{ t('budget.amount_placeholder') }}">
         </div>
         <div class="text-secondary small">
-          ※ 매칭조건들은 AND 로 결합돼. 하나라도 입력해야 실제지출이 집계됨.
+          {{ t('budget.match_help') }}
         </div>
       </div>
       <div class="modal-footer border-secondary">
-        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">취소</button>
-        <button class="btn btn-primary btn-sm" onclick="saveBudget()">저장</button>
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">{{ t('common.cancel') }}</button>
+        <button class="btn btn-primary btn-sm" onclick="saveBudget()">{{ t('common.save') }}</button>
       </div>
     </div>
   </div>
@@ -177,7 +177,7 @@ function goMonth() {
 }
 
 function openAddBudget() {
-  document.getElementById('b-modal-title').textContent = '예산 항목 추가';
+  document.getElementById('b-modal-title').textContent = {{ t('budget.add_item')|tojson }};
   document.getElementById('b-id').value = '';
   document.getElementById('b-name').value = '';
   document.getElementById('b-match-shop').value = '';
@@ -190,7 +190,7 @@ function openAddBudget() {
 
 function openEditBudget(id) {
   fetch(`/api/budget/${id}`).then(r => r.json()).then(b => {
-    document.getElementById('b-modal-title').textContent = '예산 항목 수정';
+    document.getElementById('b-modal-title').textContent = {{ t('budget.edit_item')|tojson }};
     document.getElementById('b-id').value         = b.id;
     document.getElementById('b-name').value       = b.name || '';
     document.getElementById('b-match-shop').value = b.match_shop || '';
@@ -209,7 +209,7 @@ function saveBudget() {
   const id     = document.getElementById('b-id').value;
   const name   = document.getElementById('b-name').value.trim();
   const amount = parseFloat(document.getElementById('b-amount').value);
-  if (!name || !amount) { alert('항목명과 예산은 필수임'); return; }
+  if (!name || !amount) { alert({{ t('budget.name_amount_required')|tojson }}); return; }
   const item = {
     name,
     match_shop:  document.getElementById('b-match-shop').value.trim(),
@@ -227,17 +227,17 @@ function saveBudget() {
 }
 
 function deleteBudget(id) {
-  if (!confirm('삭제하시겠습니까?')) return;
+  if (!confirm({{ t('budget.confirm_delete')|tojson }})) return;
   fetch(`/api/budget/${id}`, {method:'DELETE'}).then(() => location.reload());
 }
 
 function copyPrevMonth() {
-  if (!confirm('지난달 예산 항목들을 이번 달로 복사할까요?')) return;
+  if (!confirm({{ t('budget.confirm_copy')|tojson }})) return;
   fetch('/api/budget/copy-prev', {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({year: curYear, month: curMonth})
   }).then(r => r.json()).then(d => {
-    alert(`${d.copied || 0}개 복사 완료`);
+    alert((d.copied || 0) + {{ t('budget.copied_suffix')|tojson }});
     location.reload();
   });
 }

@@ -1,55 +1,55 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
-  <h5 class="mb-0">미분류 내역 <span class="badge bg-danger">{{ txs|length }}</span></h5>
+  <h5 class="mb-0">{{ t('uncat.title') }} <span class="badge bg-danger">{{ txs|length }}</span></h5>
 </div>
 
 {% if txs %}
 <table class="table table-dark table-hover table-sm">
   <thead class="text-secondary">
     <tr>
-      <th>날짜</th><th>소스</th><th>구입처</th><th>품목</th><th class="text-end">금액</th>
-      <th>대분류</th><th>소분류</th><th>카테고리</th><th></th>
+      <th>{{ t('common.date') }}</th><th>{{ t('uncat.source') }}</th><th>{{ t('common.shop') }}</th><th>{{ t('common.item') }}</th><th class="text-end">{{ t('common.amount') }}</th>
+      <th>{{ t('uncat.major') }}</th><th>{{ t('uncat.minor') }}</th><th>{{ t('common.category') }}</th><th></th>
     </tr>
   </thead>
   <tbody>
-    {% for t in txs %}
-    <tr id="uncat-{{ t.id }}">
-      <td class="text-secondary small">{{ t.date }}</td>
-      <td><span class="badge bg-secondary small">{{ t.source }}</span></td>
-      <td class="small">{{ t.shop or '' }}</td>
-      <td class="small">{{ t.item or '' }}</td>
-      <td class="text-end text-danger small">{{ "¥{:,.0f}".format(t.jpy_amount or 0) }}</td>
+    {% for tx in txs %}
+    <tr id="uncat-{{ tx.id }}">
+      <td class="text-secondary small">{{ tx.date }}</td>
+      <td><span class="badge bg-secondary small">{{ tx.source }}</span></td>
+      <td class="small">{{ tx.shop or '' }}</td>
+      <td class="small">{{ tx.item or '' }}</td>
+      <td class="text-end text-danger small">{{ "¥{:,.0f}".format(tx.jpy_amount or 0) }}</td>
       <td>
         <select class="form-select form-select-sm bg-dark text-white border-secondary" style="min-width:100px"
-                id="major-{{ t.id }}" onchange="loadMinorForRow({{ t.id }})">
+                id="major-{{ tx.id }}" onchange="loadMinorForRow({{ tx.id }})">
           <option value=""></option>
           {% for m in categories|map(attribute='major')|unique %}
-          <option>{{ m }}</option>
+          <option value="{{ m }}">{{ cat_label(m) }}</option>
           {% endfor %}
         </select>
       </td>
       <td>
         <select class="form-select form-select-sm bg-dark text-white border-secondary" style="min-width:90px"
-                id="minor-{{ t.id }}" onchange="loadSubForRow({{ t.id }})">
+                id="minor-{{ tx.id }}" onchange="loadSubForRow({{ tx.id }})">
           <option value=""></option>
         </select>
       </td>
       <td>
         <select class="form-select form-select-sm bg-dark text-white border-secondary" style="min-width:90px"
-                id="sub-{{ t.id }}">
+                id="sub-{{ tx.id }}">
           <option value=""></option>
         </select>
       </td>
       <td>
-        <button class="btn btn-sm btn-outline-primary" onclick="saveCategory({{ t.id }})">저장</button>
+        <button class="btn btn-sm btn-outline-primary" onclick="saveCategory({{ tx.id }})">{{ t('common.save') }}</button>
       </td>
     </tr>
     {% endfor %}
   </tbody>
 </table>
 {% else %}
-  <div class="text-center text-secondary py-5">미분류 내역이 없습니다. 👍</div>
+  <div class="text-center text-secondary py-5">{{ t('uncat.empty') }}</div>
 {% endif %}
 
 {% endblock %}
@@ -62,7 +62,7 @@ function loadMinorForRow(id) {
   const major  = document.getElementById(`major-${id}`).value;
   const minors = [...new Set(allCats.filter(c => c.major===major).map(c => c.minor))];
   const sel    = document.getElementById(`minor-${id}`);
-  sel.innerHTML = '<option value=""></option>' + minors.map(m => `<option>${m}</option>`).join('');
+  sel.innerHTML = '<option value=""></option>' + minors.map(m => `<option value="${m}">${catLabel(m)}</option>`).join('');
   loadSubForRow(id);
 }
 
@@ -71,14 +71,14 @@ function loadSubForRow(id) {
   const minor = document.getElementById(`minor-${id}`).value;
   const subs  = allCats.filter(c => c.major===major && c.minor===minor).map(c => c.sub);
   document.getElementById(`sub-${id}`).innerHTML =
-    '<option value=""></option>' + subs.map(s => `<option>${s}</option>`).join('');
+    '<option value=""></option>' + subs.map(s => `<option value="${s}">${catLabel(s)}</option>`).join('');
 }
 
 async function saveCategory(id) {
   const major    = document.getElementById(`major-${id}`).value;
   const minor    = document.getElementById(`minor-${id}`).value;
   const category = document.getElementById(`sub-${id}`).value;
-  if (!major) { alert('대분류는 선택해줘'); return; }
+  if (!major) { alert({{ t('uncat.select_major')|tojson }}); return; }
 
   // Fetch the existing transaction data, then PUT with only the category overwritten
   const tx = await fetch(`/api/transactions/${id}`).then(r => r.json());
@@ -90,7 +90,7 @@ async function saveCategory(id) {
   if (res.ok) {
     document.getElementById(`uncat-${id}`).remove();
   } else {
-    alert('저장 실패');
+    alert({{ t('uncat.save_failed')|tojson }});
   }
 }
 </script>

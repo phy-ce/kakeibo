@@ -13,6 +13,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
 from ..config import user_config_dir, user_path, resolve_secret_file, load_env
+from ..i18n import t
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
@@ -45,12 +46,7 @@ def _build_flow():
     if os.path.exists(creds_file):
         return InstalledAppFlow.from_client_secrets_file(creds_file, SCOPES)
 
-    raise RuntimeError(
-        "Gmail 동기화 설정이 없습니다. 앱을 콘솔에서 재시작하면 "
-        "GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET 입력을 안내합니다. "
-        f"또는 {user_path('.env')} 에 두 값을 직접 넣으세요 "
-        "(Google Cloud Console -> OAuth 클라이언트(데스크톱))."
-    )
+    raise RuntimeError(t('msg.gmail_not_configured', env=user_path('.env')))
 
 
 def get_gmail_service():

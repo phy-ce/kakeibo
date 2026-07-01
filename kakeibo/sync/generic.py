@@ -17,6 +17,7 @@ from bs4 import BeautifulSoup
 
 from .gmail_auth import get_gmail_service
 from ..ocr import gemini
+from ..i18n import t
 
 
 # ── Filter defaults (fully changeable by the user in settings, and can be reverted to these anytime) ──
@@ -167,7 +168,7 @@ def sync_generic(conn, days: int = None, query: str = None, max_results: int = 3
     try:
         service = get_gmail_service()
     except Exception as e:
-        return {"error": f"Gmail 인증 실패: {e}", "new_count": 0}
+        return {"error": t('msg.gmail_auth_failed', e=e), "new_count": 0}
 
     if days is None:
         row = conn.execute("SELECT value FROM settings WHERE key='mail_sync_days'").fetchone()
@@ -191,7 +192,7 @@ def sync_generic(conn, days: int = None, query: str = None, max_results: int = 3
 
     messages = results.get("messages", [])
     if not messages:
-        return {"new_count": 0, "message": "새 메일 없음"}
+        return {"new_count": 0, "message": t('msg.no_new_mail')}
 
     # Filter out already-imported gmail_ids before calling the AI to save cost
     existing = set(
@@ -255,18 +256,16 @@ def sync_generic(conn, days: int = None, query: str = None, max_results: int = 3
         conn.commit()
 
     if quota:
-        limit = "하루 20건" if quota.per_day else "분당 5건"
-        cont = "내일 다시" if quota.per_day else "잠시 후 다시"
+        limit = t('msg.quota.per_day') if quota.per_day else t('msg.quota.per_min')
+        cont = t('msg.cont.tomorrow_sync') if quota.per_day else t('msg.cont.later_sync')
         return {
             "new_count": len(new_rows),
             "quota_exceeded": True,
-            "message": (f"{len(new_rows)}개 추가 후 중단 — Gemini 무료 할당량({limit}) 초과. "
-                        f"{cont} 동기화하면 남은 메일부터 이어서 처리됩니다. "
-                        f"(사전필터로 {skipped}통은 AI 없이 걸러 호출 절약)"),
+            "message": t('msg.mail_quota_stopped', n=len(new_rows), limit=limit,
+                         cont=cont, skipped=skipped),
         }
 
     return {
         "new_count": len(new_rows),
-        "message": (f"AI 분석 {scanned}통(사전필터로 {skipped}통 스킵), "
-                    f"{len(new_rows)}개 항목 추가"),
+        "message": t('msg.mail_synced', scanned=scanned, skipped=skipped, n=len(new_rows)),
     }
