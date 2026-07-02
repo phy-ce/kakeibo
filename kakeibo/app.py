@@ -364,6 +364,7 @@ def settings():
     ).fetchall()]
     conn.close()
     from . import config
+    from .ocr import gemini
     return render_template('settings.html',
         categories=cats,
         initial_jpy=get_setting('initial_jpy_balance', '0'),
@@ -371,6 +372,8 @@ def settings():
         gmail=config.gmail_status(),
         default_senders=", ".join(generic_sync._DEFAULT_SENDERS),
         default_keywords=", ".join(generic_sync._DEFAULT_KEYWORDS),
+        ai_models=gemini.AVAILABLE_MODELS,
+        current_model=gemini.get_model_id(),
     )
 
 

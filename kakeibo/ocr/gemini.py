@@ -10,9 +10,40 @@ from PIL import Image
 
 from ..i18n import t
 
-MODEL_ID = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
+# Default model (env override, else built-in). Used when no GUI choice is stored.
+DEFAULT_MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
+
+# Models selectable from the GUI (settings page). id -> human label.
+# Curated from the account's live model list (generateContent + vision capable);
+# image/TTS/robotics/deep-research/gemma models are intentionally excluded.
+AVAILABLE_MODELS = [
+    ("gemini-flash-latest", "Gemini Flash (latest)"),
+    ("gemini-flash-lite-latest", "Gemini Flash-Lite (latest, cheapest)"),
+    ("gemini-pro-latest", "Gemini Pro (latest, most accurate)"),
+    ("gemini-3.5-flash", "Gemini 3.5 Flash"),
+    ("gemini-2.5-flash", "Gemini 2.5 Flash"),
+    ("gemini-2.5-pro", "Gemini 2.5 Pro"),
+    ("gemini-2.5-flash-lite", "Gemini 2.5 Flash-Lite"),
+    ("gemini-2.0-flash", "Gemini 2.0 Flash"),
+]
 
 _client = None
+
+
+def get_model_id() -> str:
+    """Model id to use, read at call time.
+
+    Priority: GUI setting (`gemini_model` in the settings table) -> DEFAULT_MODEL.
+    Read lazily so a change on the settings page takes effect without a restart.
+    """
+    try:
+        from ..db import get_setting
+        val = get_setting("gemini_model", "")
+        if val:
+            return val
+    except Exception:
+        pass
+    return DEFAULT_MODEL
 
 
 class QuotaError(Exception):
@@ -58,7 +89,7 @@ def generate_json(contents, max_retries=2):
     for attempt in range(max_retries + 1):
         try:
             response = client.models.generate_content(
-                model=MODEL_ID,
+                model=get_model_id(),
                 contents=contents,
                 config=types.GenerateContentConfig(response_mime_type="application/json"),
             )
@@ -123,7 +154,7 @@ def analyze_receipt(image_path: str) -> list:
 결과는 JSON 배열만 출력해.
 """
         response = client.models.generate_content(
-            model=MODEL_ID,
+            model=get_model_id(),
             contents=[image, prompt],
             config=types.GenerateContentConfig(response_mime_type="application/json")
         )

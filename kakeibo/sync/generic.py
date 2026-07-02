@@ -34,6 +34,22 @@ _DEFAULT_SENDERS = [
 # Amount pattern (whether there is an amount to record) — without this, calling the AI yields nothing
 _MONEY_RE = re.compile(r"[¥￥₩]\s?[\d,]{2,}|[\d,]{2,}\s?円|合計|税込|小計|請求金額|ご請求")
 
+# ── Order-lifecycle dedup ──
+# A single order sends several emails (ordered -> shipped -> out-for-delivery -> delivered),
+# and 2+ of them carry the full amount (e.g. Amazon "注文済み" AND "発送済み"), so parsing
+# every one double-counts the order. Count each order once at the SHIPPED/receipt stage:
+# skip a pure order-PLACEMENT email that shows no shipped/receipt signal — the later
+# shipment mail covers it. (The delivered-status "配達済み/配達中" mails carry no amount, so
+# they are already dropped by _MONEY_RE.)
+# Pure order-placement acknowledgements (skip when no shipped/receipt marker present).
+_ORDERED_RE = re.compile(
+    "注文済み|ご注文の確認|ご注文内容|ご注文を?(受け?付け|承り|うけたまわ)"
+    "|注文受付|ご注文ありがとう|order confirmation|order received|we received your order")
+# Shipped / receipt signals — if the subject has any of these it is a real purchase to keep.
+_SHIPPED_RE = re.compile(
+    "発送|出荷|配達|お届け|届け|領収|レシート|receipt|invoice|shipped|dispatched|delivered"
+    "|ご購入|購入完了|決済完了|ご請求|請求金額|明細")
+
 
 def _list_setting(conn, key: str, default: list) -> list:
     """Turn a comma-separated setting into a list. If empty, use the default (= clearing it restores the default anytime)."""
@@ -49,6 +65,11 @@ def _looks_like_purchase(sender: str, subject: str, body: str,
     head = body[:4000]
     if not _MONEY_RE.search(head):
         return False                      # No trace of an amount -> skip (nothing to record)
+    # Order-lifecycle dedup: skip a pure order-placement mail (no shipped/receipt signal
+    # in the subject); the later shipment mail carries the same amount and is kept instead.
+    subj = subject or ""
+    if _ORDERED_RE.search(subj) and not _SHIPPED_RE.search(subj):
+        return False
     s = (sender or "").lower()
     if any(a in s for a in allow):
         return True                       # Allowlisted sender + amount -> pass
@@ -164,7 +185,7 @@ def parse_email_ai(sender: str, subject: str, body: str, msg_date_ms: int) -> li
     return items
 
 
-def sync_generic(conn, days: int = None, query: str = None, max_results: int = 30) -> dict:
+def sync_generic(conn, days: int = None, query: str = None, max_results: int = None) -> dict:
     try:
         service = get_gmail_service()
     except Exception as e:
@@ -173,6 +194,17 @@ def sync_generic(conn, days: int = None, query: str = None, max_results: int = 3
     if days is None:
         row = conn.execute("SELECT value FROM settings WHERE key='mail_sync_days'").fetchone()
         days = int(row["value"]) if row else 30
+
+    # How many mails to fetch from Gmail per sync (setting, default 200). The cheap
+    # pre-filter runs before any AI call, so a larger fetch mostly costs a Gmail list
+    # call. Gmail caps a single list page at 500.
+    if max_results is None:
+        row = conn.execute("SELECT value FROM settings WHERE key='mail_sync_max'").fetchone()
+        try:
+            max_results = int(row["value"]) if row and str(row["value"]).strip() else 200
+        except (ValueError, TypeError):
+            max_results = 200
+        max_results = max(1, min(max_results, 500))
 
     # Senders/keywords: use the setting if present (replacing), otherwise the default. (Clearing the setting restores the default anytime)
     keywords = _list_setting(conn, 'email_keywords', _DEFAULT_KEYWORDS)

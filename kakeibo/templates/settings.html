@@ -17,10 +17,25 @@
           <input type="number" id="init-krw" class="form-control form-control-sm bg-dark text-white border-secondary" value="{{ initial_krw }}">
         </div>
         <div class="mb-3">
+          <label class="form-label small">{{ t('settings.ai_model') }}</label>
+          <select id="ai-model" class="form-select form-select-sm bg-dark text-white border-secondary">
+            {% for mid, label in ai_models %}
+            <option value="{{ mid }}" {% if mid == current_model %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+          <div class="text-secondary" style="font-size:0.75rem">{{ t('settings.ai_model_help') }}</div>
+        </div>
+        <div class="mb-3">
           <label class="form-label small">{{ t('settings.mail_sync_days') }}</label>
           <input type="number" id="mail-days" class="form-control form-control-sm bg-dark text-white border-secondary"
                  value="{{ get_setting('mail_sync_days', '30') }}" min="1" max="90">
           <div class="text-secondary" style="font-size:0.75rem">{{ t('settings.mail_sync_help') }}</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label small">{{ t('settings.mail_sync_max') }}</label>
+          <input type="number" id="mail-max" class="form-control form-control-sm bg-dark text-white border-secondary"
+                 value="{{ get_setting('mail_sync_max', '200') }}" min="1" max="500">
+          <div class="text-secondary" style="font-size:0.75rem">{{ t('settings.mail_sync_max_help') }}</div>
         </div>
         <div class="mb-3">
           <label class="form-label small">{{ t('settings.sender_allowlist') }}</label>
@@ -155,7 +170,9 @@ function saveSettings() {
     body: JSON.stringify({
       initial_jpy_balance: document.getElementById('init-jpy').value,
       initial_krw_balance:    document.getElementById('init-krw').value,
+      gemini_model:           document.getElementById('ai-model').value,
       mail_sync_days:         document.getElementById('mail-days').value,
+      mail_sync_max:          document.getElementById('mail-max').value,
       email_sender_allowlist: document.getElementById('mail-allow').value,
       email_keywords:         document.getElementById('mail-keywords').value,
     })

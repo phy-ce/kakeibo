@@ -233,6 +233,9 @@ TRANSLATIONS.update({
     'settings.initial_krw':           ('원화 초기 잔고 (₩)', 'Initial KRW balance (₩)'),
     'settings.mail_sync_days':        ('메일 동기화 기간 (일)', 'Mail sync period (days)'),
     'settings.mail_sync_help':        ('최근 N일 이내 메일만 가져옵니다', 'Only fetches mail from the last N days'),
+    'settings.mail_sync_max':         ('메일 조회 개수', 'Mail fetch count'),
+    'settings.mail_sync_max_help':    ('한 번에 Gmail에서 가져올 최대 메일 수 (기본 200, 최대 500). AI 호출 전 필터링됩니다.',
+                                       'Max mails fetched from Gmail per sync (default 200, max 500). Pre-filtered before any AI call.'),
     'settings.sender_allowlist':      ('구매 발신자 화이트리스트', 'Purchase sender allowlist'),
     'settings.placeholder_default':   ('비우면 기본값 사용', 'Leave empty to use defaults'),
     'settings.sender_help':           ('쉼표 구분. 이 발신자는 AI로 바로 분석.', 'Comma-separated. These senders are analyzed by AI directly.'),
@@ -262,6 +265,9 @@ TRANSLATIONS.update({
     'settings.done':                  ('완료', 'Done'),
     'settings.upload_failed':         ('업로드 실패', 'Upload failed'),
     'settings.confirm_delete':        ('삭제하시겠습니까?', 'Delete this?'),
+    'settings.ai_model':              ('AI 모델', 'AI model'),
+    'settings.ai_model_help':         ('영수증 OCR·메일 분석에 쓰는 Gemini 모델. Pro는 더 정확하지만 무료 할당량이 적어요.',
+                                       'Gemini model used for receipt OCR and mail parsing. Pro is more accurate but has a smaller free quota.'),
 })
 
 # ── stats / receipt / trash / uncategorized ──
