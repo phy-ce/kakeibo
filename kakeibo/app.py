@@ -696,11 +696,78 @@ def api_paypay():
 
 @app.route('/api/email/sync', methods=['POST'])
 def api_email():
+    """Step 1: fetch + pre-filter + AI-parse mails (no insert). Stage results for review."""
     data = request.get_json(silent=True) or {}
     conn = get_db()
-    result = generic_sync.sync_generic(conn, query=(data.get('query') or None))
+    res = generic_sync.collect_generic(conn, query=(data.get('query') or None))
     conn.close()
-    return jsonify(result)
+    if res.get('error'):
+        return jsonify({'error': res['error']})
+
+    emails = res.get('emails', [])
+    total_items = sum(len(e['items']) for e in emails)
+
+    # Nothing to review -> report a message, no review page
+    if not emails:
+        if res.get('quota_exceeded'):
+            quota = res['quota']
+            limit = t('msg.quota.per_day') if quota.per_day else t('msg.quota.per_min')
+            cont = t('msg.cont.tomorrow_sync') if quota.per_day else t('msg.cont.later_sync')
+            msg = t('msg.mail_quota_stopped', n=0, limit=limit, cont=cont, skipped=res.get('skipped', 0))
+        else:
+            msg = t('msg.no_new_mail')
+        return jsonify({'count': 0, 'message': msg})
+
+    # Stage the parsed items for the review page (same temp-session pattern as receipts)
+    session_id = uuid.uuid4().hex
+    os.makedirs(TEMP_DIR, exist_ok=True)
+    payload = {
+        'emails': emails,
+        'scanned': res.get('scanned', 0),
+        'skipped': res.get('skipped', 0),
+        'quota_exceeded': res.get('quota_exceeded', False),
+    }
+    with open(os.path.join(TEMP_DIR, f"{session_id}.json"), 'w', encoding='utf-8') as f:
+        json.dump(payload, f, ensure_ascii=False)
+    return jsonify({'session_id': session_id, 'count': total_items,
+                    'review_url': url_for('email_review', session_id=session_id)})
+
+
+@app.route('/email-review/<session_id>')
+def email_review(session_id):
+    """Step 2: review the AI-parsed mail items and pick which to add."""
+    sf = os.path.join(TEMP_DIR, f"{session_id}.json")
+    if not os.path.exists(sf):
+        return redirect(url_for('transactions'))
+    with open(sf, encoding='utf-8') as f:
+        data = json.load(f)
+    conn = get_db()
+    cats = [dict(c) for c in conn.execute(
+        "SELECT * FROM categories ORDER BY type, major, minor, sub"
+    ).fetchall()]
+    conn.close()
+    return render_template('email_review.html',
+        session_id=session_id, emails=data.get('emails', []),
+        scanned=data.get('scanned', 0), skipped=data.get('skipped', 0),
+        quota_exceeded=data.get('quota_exceeded', False), categories=cats)
+
+
+@app.route('/api/email/confirm', methods=['POST'])
+def api_email_confirm():
+    """Step 3: insert only the items the user selected on the review page."""
+    d = request.json or {}
+    session_id = d.get('session_id')
+    items = d.get('items', [])
+    conn = get_db()
+    n = generic_sync.insert_email_items(conn, items)
+    conn.close()
+    sf = os.path.join(TEMP_DIR, f"{session_id}.json") if session_id else None
+    if sf and os.path.exists(sf):
+        try:
+            os.remove(sf)
+        except OSError:
+            pass
+    return jsonify({'saved': n, 'message': t('msg.added_n', n=n)})
 
 
 # ── api: Gmail credentials upload ─────────────────────────────────────────────

@@ -185,11 +185,20 @@ def parse_email_ai(sender: str, subject: str, body: str, msg_date_ms: int) -> li
     return items
 
 
-def sync_generic(conn, days: int = None, query: str = None, max_results: int = None) -> dict:
+def collect_generic(conn, days: int = None, query: str = None, max_results: int = None) -> dict:
+    """Fetch + pre-filter + AI-parse purchase mails, WITHOUT inserting.
+
+    Returns parsed items grouped per email so the caller can render a review page
+    and let the user pick which to add. Already-imported gmail_ids and the cheap
+    pre-filter are dropped before any AI call, exactly as before.
+
+    Returns: {emails, scanned, skipped, quota, quota_exceeded} or {error, ...}.
+    Each email = {gmail_id, sender, subject, date, items:[{date,type,major,minor,sub,shop,item,amount}]}.
+    """
     try:
         service = get_gmail_service()
     except Exception as e:
-        return {"error": t('msg.gmail_auth_failed', e=e), "new_count": 0}
+        return {"error": t('msg.gmail_auth_failed', e=e), "emails": [], "scanned": 0, "skipped": 0}
 
     if days is None:
         row = conn.execute("SELECT value FROM settings WHERE key='mail_sync_days'").fetchone()
@@ -220,11 +229,11 @@ def sync_generic(conn, days: int = None, query: str = None, max_results: int = N
         results = service.users().messages().list(
             userId="me", q=query, maxResults=max_results).execute()
     except Exception as e:
-        return {"error": str(e), "new_count": 0}
+        return {"error": str(e), "emails": [], "scanned": 0, "skipped": 0}
 
     messages = results.get("messages", [])
     if not messages:
-        return {"new_count": 0, "message": t('msg.no_new_mail')}
+        return {"emails": [], "scanned": 0, "skipped": 0}
 
     # Filter out already-imported gmail_ids before calling the AI to save cost
     existing = set(
@@ -234,7 +243,7 @@ def sync_generic(conn, days: int = None, query: str = None, max_results: int = N
         ).fetchall() if r[0]
     )
 
-    new_rows = []
+    emails = []
     scanned = 0
     skipped = 0
     quota = None
@@ -268,36 +277,91 @@ def sync_generic(conn, days: int = None, query: str = None, max_results: int = N
             break
         if not items:
             continue
-        for it in items:
-            new_rows.append({
-                "date": it["date"], "type": it["type"],
-                "major": it["major"], "minor": it["minor"], "category": it["sub"],
-                "shop": it["shop"], "item": it["item"],
-                "jpy_amount": it["amount"], "krw_amount": None,
-                "note": "", "exchange_rate": None,
-                "source": "email", "gmail_id": mid,
-            })
+        dt = datetime.datetime.fromtimestamp(ms / 1000)
+        emails.append({
+            "gmail_id": mid,
+            "sender": sender,
+            "subject": subject,
+            "date": f"{dt.year}-{dt.month:02d}-{dt.day:02d}",
+            "items": items,
+        })
         existing.add(mid)
 
-    if new_rows:
+    return {"emails": emails, "scanned": scanned, "skipped": skipped,
+            "quota": quota, "quota_exceeded": bool(quota)}
+
+
+def insert_email_items(conn, items: list) -> int:
+    """Insert user-selected mail items (each carrying its own gmail_id). Returns inserted count.
+
+    Email-level dedup: skip any gmail_id already present in the ledger (guards a
+    double confirm / re-sync). Siblings of the same email are unaffected because the
+    'existing' set is snapshotted once up front, not updated per row.
+    """
+    existing = set(
+        r[0] for r in conn.execute(
+            "SELECT gmail_id FROM transactions "
+            "WHERE gmail_id != '' AND gmail_id IS NOT NULL AND deleted_at IS NULL"
+        ).fetchall() if r[0]
+    )
+    rows = []
+    for it in items:
+        gid = str(it.get("gmail_id") or "")
+        if gid and gid in existing:
+            continue
+        try:
+            amount = int(round(float(it.get("amount"))))
+        except (ValueError, TypeError):
+            continue
+        if amount == 0:
+            continue
+        item_name = str(it.get("item", "")).strip()
+        if not item_name:
+            continue
+        rows.append({
+            "date": str(it.get("date") or "")[:10],
+            "type": str(it.get("type") or ("수입" if amount > 0 else "지출")),
+            "major": str(it.get("major", "")).strip(),
+            "minor": str(it.get("minor", "")).strip(),
+            "category": str(it.get("sub", "")).strip(),
+            "shop": str(it.get("shop", "")).strip(),
+            "item": item_name,
+            "jpy_amount": amount, "krw_amount": None,
+            "note": "", "exchange_rate": None,
+            "source": "email", "gmail_id": gid,
+        })
+    if rows:
         conn.executemany("""
             INSERT INTO transactions
             (date,type,major,minor,category,shop,item,jpy_amount,krw_amount,note,exchange_rate,source,gmail_id)
             VALUES (:date,:type,:major,:minor,:category,:shop,:item,:jpy_amount,:krw_amount,:note,:exchange_rate,:source,:gmail_id)
-        """, new_rows)
+        """, rows)
         conn.commit()
+    return len(rows)
 
-    if quota:
+
+def sync_generic(conn, days: int = None, query: str = None, max_results: int = None) -> dict:
+    """One-shot fetch + parse + INSERT (no review). Kept for programmatic callers."""
+    res = collect_generic(conn, days=days, query=query, max_results=max_results)
+    if res.get("error"):
+        return {"error": res["error"], "new_count": 0}
+
+    items = [{**it, "gmail_id": em["gmail_id"]}
+             for em in res["emails"] for it in em["items"]]
+    n = insert_email_items(conn, items)
+    scanned, skipped = res["scanned"], res["skipped"]
+
+    if res.get("quota"):
+        quota = res["quota"]
         limit = t('msg.quota.per_day') if quota.per_day else t('msg.quota.per_min')
         cont = t('msg.cont.tomorrow_sync') if quota.per_day else t('msg.cont.later_sync')
         return {
-            "new_count": len(new_rows),
-            "quota_exceeded": True,
-            "message": t('msg.mail_quota_stopped', n=len(new_rows), limit=limit,
-                         cont=cont, skipped=skipped),
+            "new_count": n, "quota_exceeded": True,
+            "message": t('msg.mail_quota_stopped', n=n, limit=limit, cont=cont, skipped=skipped),
         }
-
+    if not res["emails"] and scanned == 0 and skipped == 0:
+        return {"new_count": 0, "message": t('msg.no_new_mail')}
     return {
-        "new_count": len(new_rows),
-        "message": t('msg.mail_synced', scanned=scanned, skipped=skipped, n=len(new_rows)),
+        "new_count": n,
+        "message": t('msg.mail_synced', scanned=scanned, skipped=skipped, n=n),
     }

@@ -578,6 +578,7 @@ async function syncAllMail() {
   showToast({{ t('tx.syncing_mail')|tojson }});
   try {
     const d = await fetch('/api/email/sync', {method:'POST'}).then(r => r.json());
+    if (d.review_url) { window.location.href = d.review_url; return; }   // go review before adding
     showToast(d.message || d.error || {{ t('tx.done')|tojson }});
   } catch(e) {
     showToast({{ t('tx.mail_sync_error')|tojson }});

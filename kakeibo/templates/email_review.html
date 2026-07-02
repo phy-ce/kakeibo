@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h5 class="mb-0">{{ t('email.review_title') }}</h5>
+    <div class="text-secondary small">{{ t('email.review_help') }}</div>
+  </div>
+  <div class="d-flex gap-2">
+    <button class="btn btn-outline-secondary btn-sm" onclick="toggleAll(true)">{{ t('receipt.select_all') }}</button>
+    <button class="btn btn-outline-secondary btn-sm" onclick="toggleAll(false)">{{ t('receipt.deselect_all') }}</button>
+    <button class="btn btn-secondary btn-sm" onclick="location.href='/transactions'">{{ t('common.cancel') }}</button>
+    <button class="btn btn-success btn-sm" onclick="confirmSelected()">{{ t('email.add_selected') }}</button>
+  </div>
+</div>
+
+{% if quota_exceeded %}
+<div class="alert alert-warning py-2 small">{{ t('email.quota_partial') }}</div>
+{% endif %}
+
+{% if not emails %}
+<div class="text-secondary">{{ t('email.nothing') }}</div>
+{% endif %}
+
+<div id="review-container">
+{% for email in emails %}
+<div class="card bg-dark border-secondary mb-4">
+  <div class="card-header border-secondary d-flex align-items-center gap-2">
+    <input type="checkbox" class="form-check-input mt-0 email-toggle" checked onchange="toggleEmail(this)"
+           title="{{ t('email.toggle_all_in_mail') }}">
+    <div class="flex-grow-1 min-w-0">
+      <div class="small text-white text-truncate">{{ email.subject }}</div>
+      <div class="text-secondary text-truncate" style="font-size:0.75rem">{{ email.sender }} · {{ email.date }}</div>
+    </div>
+    <span class="text-secondary small flex-shrink-0">{{ email['items']|length }}{{ t('receipt.items_count_suffix') }}</span>
+  </div>
+  <div class="card-body p-2">
+    {% for item in email['items'] %}
+    <div class="review-item border border-secondary rounded p-2 mb-2" data-gmail-id="{{ email.gmail_id }}">
+      <div class="row g-2 align-items-center">
+        <div class="col-auto d-flex align-items-center">
+          <input type="checkbox" class="form-check-input field-include" checked>
+        </div>
+        <div class="col-md-2">
+          <input type="date" class="form-control form-control-sm bg-dark text-white border-secondary field-date" value="{{ item.date or '' }}">
+        </div>
+        <div class="col-md-1">
+          <select class="form-select form-select-sm bg-dark text-white border-secondary field-type">
+            <option value="지출" {% if item.type=='지출' %}selected{% endif %}>{{ cat_label('지출') }}</option>
+            <option value="수입" {% if item.type=='수입' %}selected{% endif %}>{{ cat_label('수입') }}</option>
+          </select>
+        </div>
+        <div class="col-md-2">
+          <select class="form-select form-select-sm bg-dark text-white border-secondary field-major" onchange="reviewLoadMinor(this)">
+            <option value=""></option>
+            {% set majors = categories|map(attribute='major')|unique|list %}
+            {% for m in majors %}
+            <option value="{{ m }}" {% if item.major==m %}selected{% endif %}>{{ cat_label(m) }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-2">
+          <select class="form-select form-select-sm bg-dark text-white border-secondary field-minor">
+            <option value="{{ item.minor or '' }}">{{ cat_label(item.minor or '') }}</option>
+          </select>
+        </div>
+        <div class="col-md-2">
+          <select class="form-select form-select-sm bg-dark text-white border-secondary field-sub">
+            <option value="{{ item.sub or '' }}">{{ cat_label(item.sub or '') }}</option>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <input type="text" class="form-control form-control-sm bg-dark text-white border-secondary field-shop" value="{{ item.shop or '' }}" placeholder="{{ t('common.shop') }}">
+        </div>
+        <div class="col-md-6">
+          <input type="text" class="form-control form-control-sm bg-dark text-white border-secondary field-item" value="{{ item.item or '' }}" placeholder="{{ t('receipt.item_name') }}">
+        </div>
+        <div class="col-md-2">
+          <input type="number" class="form-control form-control-sm bg-dark text-white border-secondary field-amount" value="{{ item.amount or '' }}" placeholder="{{ t('common.amount') }}">
+        </div>
+        <div class="col-md-1 d-flex align-items-center">
+          <button class="btn btn-sm btn-outline-danger" onclick="this.closest('.review-item').remove()"><i class="bi bi-trash"></i></button>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endfor %}
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const allCats = {{ categories|tojson }};
+const sessionId = "{{ session_id }}";
+
+function reviewLoadMinor(majorSel) {
+  const item  = majorSel.closest('.review-item');
+  const major = majorSel.value;
+  const minors = [...new Set(allCats.filter(c => c.major === major).map(c => c.minor))];
+  const minorSel = item.querySelector('.field-minor');
+  minorSel.innerHTML = '<option value=""></option>' + minors.map(m => `<option value="${m}">${catLabel(m)}</option>`).join('');
+  reviewLoadSub(minorSel);
+}
+
+function reviewLoadSub(minorSel) {
+  const item  = minorSel.closest('.review-item');
+  const major = item.querySelector('.field-major').value;
+  const minor = minorSel.value;
+  const subs  = allCats.filter(c => c.major===major && c.minor===minor).map(c => c.sub);
+  item.querySelector('.field-sub').innerHTML = '<option value=""></option>' + subs.map(s => `<option value="${s}">${catLabel(s)}</option>`).join('');
+}
+
+function toggleAll(v) {
+  document.querySelectorAll('.field-include, .email-toggle').forEach(c => c.checked = v);
+}
+
+function toggleEmail(cb) {
+  cb.closest('.card').querySelectorAll('.field-include').forEach(c => c.checked = cb.checked);
+}
+
+function confirmSelected() {
+  const items = [];
+  document.querySelectorAll('.review-item').forEach(el => {
+    if (!el.querySelector('.field-include').checked) return;   // only the checked ones
+    items.push({
+      gmail_id: el.dataset.gmailId,
+      date:   el.querySelector('.field-date').value,
+      type:   el.querySelector('.field-type').value,
+      major:  el.querySelector('.field-major').value,
+      minor:  el.querySelector('.field-minor').value,
+      sub:    el.querySelector('.field-sub').value,
+      shop:   el.querySelector('.field-shop').value,
+      item:   el.querySelector('.field-item').value,
+      amount: parseFloat(el.querySelector('.field-amount').value) || null,
+    });
+  });
+  if (!items.length) { alert({{ t('email.select_one')|tojson }}); return; }
+  fetch('/api/email/confirm', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({session_id: sessionId, items})
+  }).then(r => r.json()).then(d => {
+    alert((d.saved || 0) + {{ t('receipt.saved_suffix')|tojson }});
+    window.location.href = '/transactions';
+  });
+}
+</script>
+{% endblock %}

@@ -58,11 +58,19 @@ The transaction list (`transactions.html`) groups rows by `receipt_id` (fallback
 
 ## Generic mail sync (sync/generic.py)
 
-Fetch with a broad Gmail query, then **pre-filter before calling the AI** (`_looks_like_purchase`) to select only purchase emails and parse them with Gemini. Dedup via `gmail_id`. `/api/email/sync`.
+Fetch with a broad Gmail query, then **pre-filter before calling the AI** (`_looks_like_purchase`) to select only purchase emails and parse them with Gemini. Dedup via `gmail_id`.
 
-- Filter: skip if no money pattern → pass if whitelisted sender or purchase keyword present.
-- User settings (settings page): `email_sender_allowlist`, `email_keywords` (comma-separated, **fill = replace defaults, empty = defaults**), `mail_sync_days`. Defaults are `generic._DEFAULT_SENDERS/_DEFAULT_KEYWORDS`.
+Flow is **3-step with a review page** (mirrors receipts), so the user confirms which items to add:
+1. `POST /api/email/sync` → `collect_generic()` fetches + pre-filters + AI-parses **without inserting**, stages the per-email items to `~/.kakeibo/temp/{sid}.json`, returns `review_url`. (No new items → returns a message, no page.)
+2. `/email-review/<sid>` (`email_review.html`) — items grouped per email, each with an **include checkbox** (default on) + editable fields; select-all / per-email toggle.
+3. `POST /api/email/confirm` → `insert_email_items()` inserts only the checked items (email-level `gmail_id` dedup guards double-confirm), deletes the session file.
+
+`sync_generic()` (collect + insert in one shot, no review) is kept for programmatic callers.
+
+- Filter: skip if no money pattern → **skip pure order-placement mails** (`_ORDERED_RE` and no `_SHIPPED_RE` signal, so an order is counted once at the shipped stage, not duplicated) → pass if whitelisted sender or purchase keyword present.
+- User settings (settings page): `email_sender_allowlist`, `email_keywords` (comma-separated, **fill = replace defaults, empty = defaults**), `mail_sync_days`, `mail_sync_max` (Gmail fetch count, default 200, clamped 1..500). Defaults are `generic._DEFAULT_SENDERS/_DEFAULT_KEYWORDS`.
 - Free-quota handling (gemini-3.5-flash: 5/min, 20/day): on 429, `gemini.QuotaError` → **stop the sync immediately** (avoids a flood), save what was processed, continue on the next run.
+- Gemini model is user-selectable in settings (`gemini_model`, `gemini.get_model_id()` read at call time); default `gemini.DEFAULT_MODEL`.
 
 ## Internationalization (i18n) — `kakeibo/i18n.py`
 

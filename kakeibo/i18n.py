@@ -313,4 +313,14 @@ TRANSLATIONS.update({
     'uncat.empty':                  ('미분류 내역이 없습니다. 👍', 'No uncategorized transactions. 👍'),
     'uncat.select_major':           ('대분류는 선택해줘', 'Please select a major category'),
     'uncat.save_failed':            ('저장 실패', 'Save failed'),
+    # email review (AI mail -> confirm before add)
+    'email.review_title':           ('메일에서 추가할 항목 확인', 'Review items to add from mail'),
+    'email.review_help':            ('AI가 분석한 항목입니다. 추가할 것만 체크하고 저장하세요.',
+                                     'Items parsed by AI. Check only the ones to add, then save.'),
+    'email.add_selected':           ('선택 추가', 'Add selected'),
+    'email.select_one':             ('추가할 항목을 하나 이상 선택하세요', 'Select at least one item to add'),
+    'email.nothing':                ('추가할 새 항목이 없습니다.', 'No new items to add.'),
+    'email.toggle_all_in_mail':     ('이 메일 항목 전체 선택/해제', 'Select/deselect all items in this mail'),
+    'email.quota_partial':          ('Gemini 무료 할당량 초과로 일부만 분석됐습니다. 나머지는 나중에 다시 동기화하세요.',
+                                     'Only part was analyzed due to the Gemini free-quota limit. Sync again later for the rest.'),
 })
