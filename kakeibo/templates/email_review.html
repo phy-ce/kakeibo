@@ -1,25 +1,87 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
+<div class="review-head d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
   <div>
     <h5 class="mb-0">{{ t('email.review_title') }}</h5>
-    <div class="text-secondary small">{{ t('email.review_help') }}</div>
+    <div class="text-secondary small">
+      {{ t('email.review_help') }}
+      <span class="ms-1">({{ t('sync.stat_analyzed') }} {{ scanned }} · {{ t('sync.stat_skipped') }} {{ skipped }})</span>
+    </div>
   </div>
   <div class="d-flex gap-2">
     <button class="btn btn-outline-secondary btn-sm" onclick="toggleAll(true)">{{ t('receipt.select_all') }}</button>
     <button class="btn btn-outline-secondary btn-sm" onclick="toggleAll(false)">{{ t('receipt.deselect_all') }}</button>
     <button class="btn btn-secondary btn-sm" onclick="location.href='/transactions'">{{ t('common.cancel') }}</button>
-    <button class="btn btn-success btn-sm" onclick="confirmSelected()">{{ t('email.add_selected') }}</button>
+    <button class="btn btn-success btn-sm px-3" onclick="confirmSelected()">
+      <i class="bi bi-check2"></i> {{ t('email.add_selected') }} <span id="sel-count" class="badge bg-dark ms-1">0</span>
+    </button>
   </div>
 </div>
 
 {% if quota_exceeded %}
-<div class="alert alert-warning py-2 small">{{ t('email.quota_partial') }}</div>
+<div class="alert alert-warning py-2 small">{{ t('email.quota_partial', total=total, done=examined, remaining=remaining) }}</div>
+{% endif %}
+{% if model_error %}
+<div class="alert alert-danger py-2 small">{{ t('email.model_error_partial') }}</div>
+{% endif %}
+{% if overloaded %}
+<div class="alert alert-warning py-2 small">{{ t('email.overload_partial', total=total, done=examined, remaining=remaining) }}</div>
+{% endif %}
+
+{# Subjects of the mails the run never got to, so "the rest" is not a mystery #}
+{% if remaining_samples %}
+<details class="alert alert-secondary py-2 small">
+  <summary class="fw-semibold">{{ t('email.remaining_list', remaining=remaining, shown=remaining_samples|length) }}</summary>
+  <ul class="mb-0 mt-2 ps-3">
+    {% for m in remaining_samples %}
+    <li class="text-truncate">{{ m.subject }} <span class="text-secondary">— {{ m.sender }}</span></li>
+    {% endfor %}
+  </ul>
+</details>
+{% endif %}
+
+{% set dup_n = namespace(n=0) %}
+{% for email in emails %}{% for item in email['items'] %}{% if item.dup %}{% set dup_n.n = dup_n.n + 1 %}{% endif %}{% endfor %}{% endfor %}
+{% if dup_n.n %}
+<div class="alert alert-secondary py-2 small"><i class="bi bi-files"></i> {{ t('email.dup_summary', n=dup_n.n) }} {{ t('review.dup_help') }}</div>
 {% endif %}
 
 {% if not emails %}
 <div class="text-secondary">{{ t('email.nothing') }}</div>
 {% endif %}
+
+<!-- Original mail text, so the AI's reading can be checked before adding -->
+<div class="modal fade" id="mail-src-modal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content bg-dark border-secondary">
+      <div class="modal-header border-secondary py-2">
+        <div class="min-w-0">
+          <h6 class="modal-title text-truncate" id="mail-src-subject"></h6>
+          <div class="text-secondary" style="font-size:0.75rem" id="mail-src-meta"></div>
+        </div>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <pre id="mail-src-body" class="small text-white-50 mb-0"
+             style="white-space:pre-wrap;word-break:break-word"></pre>
+        <div id="mail-src-more" class="text-secondary small mt-2" style="display:none">
+          {{ t('email.source_truncated') }}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function showMail(btn) {
+  document.getElementById('mail-src-subject').textContent = btn.dataset.subject || '';
+  document.getElementById('mail-src-meta').textContent =
+    (btn.dataset.sender || '') + ' · ' + (btn.dataset.date || '');
+  document.getElementById('mail-src-body').textContent = btn.dataset.body || '';
+  document.getElementById('mail-src-more').style.display = btn.dataset.truncated ? '' : 'none';
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('mail-src-modal')).show();
+}
+</script>
 
 <div id="review-container">
 {% for email in emails %}
@@ -32,53 +94,72 @@
       <div class="text-secondary text-truncate" style="font-size:0.75rem">{{ email.sender }} · {{ email.date }}</div>
     </div>
     <span class="text-secondary small flex-shrink-0">{{ email['items']|length }}{{ t('receipt.items_count_suffix') }}</span>
+    {% if email.body %}
+    <button type="button" class="btn btn-outline-secondary btn-sm flex-shrink-0"
+            title="{{ t('email.view_source') }}"
+            onclick="showMail(this)"
+            data-subject="{{ email.subject }}" data-sender="{{ email.sender }}"
+            data-date="{{ email.date }}" data-truncated="{{ '1' if email.body_truncated else '' }}"
+            data-body="{{ email.body }}">
+      <i class="bi bi-envelope-open"></i> {{ t('email.view_source') }}
+    </button>
+    {% endif %}
   </div>
   <div class="card-body p-2">
     {% for item in email['items'] %}
-    <div class="review-item border border-secondary rounded p-2 mb-2" data-gmail-id="{{ email.gmail_id }}">
+    <div class="review-item{% if item.dup %} review-dup{% endif %}" data-gmail-id="{{ email.gmail_id }}" data-note="{{ item.note or '' }}"
+         data-major="{{ item.major or '' }}" data-minor="{{ item.minor or '' }}" data-sub="{{ item.sub or '' }}">
+      <!-- line 1: what was bought -->
       <div class="row g-2 align-items-center">
         <div class="col-auto d-flex align-items-center">
-          <input type="checkbox" class="form-check-input field-include" checked>
+          <input type="checkbox" class="form-check-input field-include" {% if not item.dup %}checked{% endif %} onchange="syncItemState(this)">
         </div>
-        <div class="col-md-2">
-          <input type="date" class="form-control form-control-sm bg-dark text-white border-secondary field-date" value="{{ item.date or '' }}">
+        <div class="col-6 col-md-2">
+          <input type="date" title="{{ t('common.date') }}"
+                 class="form-control form-control-sm field-date" value="{{ item.date or '' }}">
         </div>
-        <div class="col-md-1">
-          <select class="form-select form-select-sm bg-dark text-white border-secondary field-type">
+        <div class="col-6 col-md-1">
+          <select class="form-select form-select-sm field-type" title="{{ t('common.type') }}" onchange="reviewLoadMajor(this)">
             <option value="지출" {% if item.type=='지출' %}selected{% endif %}>{{ cat_label('지출') }}</option>
             <option value="수입" {% if item.type=='수입' %}selected{% endif %}>{{ cat_label('수입') }}</option>
           </select>
         </div>
-        <div class="col-md-2">
-          <select class="form-select form-select-sm bg-dark text-white border-secondary field-major" onchange="reviewLoadMinor(this)">
-            <option value=""></option>
-            {% set majors = categories|map(attribute='major')|unique|list %}
-            {% for m in majors %}
-            <option value="{{ m }}" {% if item.major==m %}selected{% endif %}>{{ cat_label(m) }}</option>
-            {% endfor %}
-          </select>
+        <div class="col-12 col-md-3">
+          <input type="text" class="form-control form-control-sm field-shop" value="{{ item.shop or '' }}" placeholder="{{ t('common.shop') }}">
         </div>
-        <div class="col-md-2">
-          <select class="form-select form-select-sm bg-dark text-white border-secondary field-minor">
-            <option value="{{ item.minor or '' }}">{{ cat_label(item.minor or '') }}</option>
-          </select>
+        <div class="col-12 col-md-3">
+          <input type="text" class="form-control form-control-sm text-white field-item" value="{{ item.item or '' }}" placeholder="{{ t('receipt.item_name') }}"
+                 {% if item.note %}title="{{ item.note }}"{% endif %}>
         </div>
-        <div class="col-md-2">
-          <select class="form-select form-select-sm bg-dark text-white border-secondary field-sub">
-            <option value="{{ item.sub or '' }}">{{ cat_label(item.sub or '') }}</option>
-          </select>
+        <div class="col-12 col-md-2">
+          <input type="number" class="form-control form-control-sm text-end field-amount" value="{{ item.amount or '' }}" placeholder="{{ t('common.amount') }}">
         </div>
-        <div class="col-md-3">
-          <input type="text" class="form-control form-control-sm bg-dark text-white border-secondary field-shop" value="{{ item.shop or '' }}" placeholder="{{ t('common.shop') }}">
+      </div>
+      {% if item.dup %}
+      <div class="review-dupline">
+        <i class="bi bi-files"></i>
+        {{ t('review.dup_ledger') if item.dup.where == 'ledger' else t('review.dup_batch') }}:
+        {{ item.dup.date }} · {{ item.dup.shop }} · {{ item.dup.item }} · {{ "¥{:,.0f}".format(item.dup.amount) }}
+      </div>
+      {% endif %}
+      <!-- line 2: category cascade (options built by review.js from data-major/minor/sub) -->
+      <div class="row g-2 align-items-center mt-0">
+        <div class="col-auto"><span class="review-tag"><i class="bi bi-tags"></i> {{ t('review.category') }}</span>
+          {% if item.dup %}<span class="review-dupbadge" title="{{ t('review.dup_help') }}"><i class="bi bi-files"></i> {{ t('review.dup') }}</span>{% endif %}
+          {% if item.cat_from == 'history' %}<span class="review-hist" title="{{ t('review.from_history_tip') }}"><i class="bi bi-clock-history"></i> {{ t('review.from_history') }}</span>{% endif %}
         </div>
-        <div class="col-md-6">
-          <input type="text" class="form-control form-control-sm bg-dark text-white border-secondary field-item" value="{{ item.item or '' }}" placeholder="{{ t('receipt.item_name') }}">
+        <div class="col">
+          <select class="form-select form-select-sm field-major" data-placeholder="{{ t('uncat.major') }}" onchange="reviewLoadMinor(this)"></select>
         </div>
-        <div class="col-md-2">
-          <input type="number" class="form-control form-control-sm bg-dark text-white border-secondary field-amount" value="{{ item.amount or '' }}" placeholder="{{ t('common.amount') }}">
+        <div class="col">
+          <select class="form-select form-select-sm field-minor" data-placeholder="{{ t('uncat.minor') }}" onchange="reviewLoadSub(this)"></select>
         </div>
-        <div class="col-md-1 d-flex align-items-center">
-          <button class="btn btn-sm btn-outline-danger" onclick="this.closest('.review-item').remove()"><i class="bi bi-trash"></i></button>
+        <div class="col">
+          <select class="form-select form-select-sm field-sub" data-placeholder="{{ t('review.sub') }}"></select>
+        </div>
+        <div class="col-auto">
+          <button class="btn btn-sm btn-outline-danger" title="{{ t('review.remove_row') }}"
+                  onclick="this.closest('.review-item').remove()"><i class="bi bi-trash"></i></button>
         </div>
       </div>
     </div>
@@ -95,30 +176,30 @@
 const allCats = {{ categories|tojson }};
 const sessionId = "{{ session_id }}";
 
-function reviewLoadMinor(majorSel) {
-  const item  = majorSel.closest('.review-item');
-  const major = majorSel.value;
-  const minors = [...new Set(allCats.filter(c => c.major === major).map(c => c.minor))];
-  const minorSel = item.querySelector('.field-minor');
-  minorSel.innerHTML = '<option value=""></option>' + minors.map(m => `<option value="${m}">${catLabel(m)}</option>`).join('');
-  reviewLoadSub(minorSel);
-}
-
-function reviewLoadSub(minorSel) {
-  const item  = minorSel.closest('.review-item');
-  const major = item.querySelector('.field-major').value;
-  const minor = minorSel.value;
-  const subs  = allCats.filter(c => c.major===major && c.minor===minor).map(c => c.sub);
-  item.querySelector('.field-sub').innerHTML = '<option value=""></option>' + subs.map(s => `<option value="${s}">${catLabel(s)}</option>`).join('');
-}
-
 function toggleAll(v) {
   document.querySelectorAll('.field-include, .email-toggle').forEach(c => c.checked = v);
+  refreshSelection();
 }
 
 function toggleEmail(cb) {
   cb.closest('.card').querySelectorAll('.field-include').forEach(c => c.checked = cb.checked);
+  refreshSelection();
 }
+
+function syncItemState(cb) { refreshSelection(); }
+
+// Dim the rows that will not be added, and keep the count on the save button honest.
+function refreshSelection() {
+  let n = 0;
+  document.querySelectorAll('.review-item').forEach(el => {
+    const on = el.querySelector('.field-include').checked;
+    el.classList.toggle('review-item-off', !on);
+    if (on) n++;
+  });
+  document.getElementById('sel-count').textContent = n;
+}
+
+document.addEventListener('DOMContentLoaded', refreshSelection);
 
 function confirmSelected() {
   const items = [];
@@ -126,6 +207,7 @@ function confirmSelected() {
     if (!el.querySelector('.field-include').checked) return;   // only the checked ones
     items.push({
       gmail_id: el.dataset.gmailId,
+      note:   el.dataset.note || '',
       date:   el.querySelector('.field-date').value,
       type:   el.querySelector('.field-type').value,
       major:  el.querySelector('.field-major').value,
@@ -146,4 +228,5 @@ function confirmSelected() {
   });
 }
 </script>
+<script src="{{ url_for('static', filename='js/review.js') }}"></script>
 {% endblock %}

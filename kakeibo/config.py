@@ -153,3 +153,84 @@ def prompt_missing_keys() -> None:
                 print(f"  저장 완료 -> {env_path}\n")
             else:
                 print("  건너뜀 - OCR 기능은 키를 넣기 전까지 비활성화됩니다.\n")
+
+
+# ── housekeeping: temp sessions and DB backups ────────────────────────────────
+
+# Staged receipt photos / mail sessions are removed when the user confirms. Anything
+# older than this was abandoned (browser closed, review page left) and only wastes disk.
+TEMP_TTL_DAYS = 3
+
+# Rotating copies of the ledger kept in ~/.kakeibo/backups (one per day, newest kept).
+BACKUP_KEEP = 7
+
+
+def cleanup_temp(ttl_days: int = None) -> int:
+    """Delete abandoned staging sessions in ~/.kakeibo/temp. Returns the count removed.
+
+    A session is a `{uuid}` directory plus a `{uuid}.json` file; both are dropped once
+    they are older than the TTL. Never raises — housekeeping must not block startup.
+    """
+    import shutil
+    import time
+
+    ttl = (TEMP_TTL_DAYS if ttl_days is None else ttl_days) * 86400
+    temp_dir = user_path("temp")
+    if not os.path.isdir(temp_dir):
+        return 0
+    cutoff = time.time() - ttl
+    removed = 0
+    for name in os.listdir(temp_dir):
+        path = os.path.join(temp_dir, name)
+        try:
+            if os.path.getmtime(path) > cutoff:
+                continue
+            if os.path.isdir(path):
+                shutil.rmtree(path, ignore_errors=True)
+            else:
+                os.remove(path)
+            removed += 1
+        except OSError:
+            continue
+    return removed
+
+
+def backup_db() -> str:
+    """Keep a dated copy of the ledger in ~/.kakeibo/backups (at most one per day).
+
+    Uses the sqlite3 backup API rather than a file copy, so a backup taken while the
+    app is running is consistent (WAL pages included). Returns the path written, or ''.
+    """
+    import datetime
+    import sqlite3
+
+    src = user_path("kakeibo.db")
+    if not os.path.exists(src):
+        return ""
+    backup_dir = user_path("backups")
+    os.makedirs(backup_dir, exist_ok=True)
+    stamp = datetime.date.today().isoformat()
+    dst = os.path.join(backup_dir, f"kakeibo-{stamp}.db")
+    if os.path.exists(dst):
+        return ""                      # already backed up today
+    try:
+        conn = sqlite3.connect(src)
+        out = sqlite3.connect(dst)
+        with out:
+            conn.backup(out)
+        out.close()
+        conn.close()
+    except Exception as e:
+        print(f"[backup] failed: {e}")
+        return ""
+
+    # Rotate: keep only the newest BACKUP_KEEP files
+    try:
+        files = sorted(
+            (f for f in os.listdir(backup_dir) if f.startswith("kakeibo-") and f.endswith(".db")),
+            reverse=True)
+        for old in files[BACKUP_KEEP:]:
+            os.remove(os.path.join(backup_dir, old))
+    except OSError:
+        pass
+    return dst

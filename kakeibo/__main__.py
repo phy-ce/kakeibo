@@ -14,10 +14,22 @@ def main():
     from .config import prompt_missing_keys
     prompt_missing_keys()
 
-    from .app import app
+    from . import config
+    from .app import app, purge_orphan_images
     from .db import init_db
 
     init_db()
+
+    # Housekeeping (ASCII console output only - see CLAUDE.md, cp949 consoles)
+    dst = config.backup_db()
+    if dst:
+        print(f"[backup] {os.path.basename(dst)}")
+    n = config.cleanup_temp()
+    if n:
+        print(f"[cleanup] removed {n} stale temp session(s)")
+    n = purge_orphan_images()
+    if n:
+        print(f"[cleanup] removed {n} unreferenced receipt image(s)")
     port = int(os.environ.get("FLASK_PORT", "5000"))
     # Automatically open the browser when the exe is double-clicked
     if os.environ.get("KAKEIBO_NO_BROWSER", "") != "1":

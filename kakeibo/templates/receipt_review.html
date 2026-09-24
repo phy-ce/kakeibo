@@ -1,70 +1,80 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <h5 class="mb-0">{{ t('receipt.review_receipt') }}</h5>
+<div class="review-head d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h5 class="mb-0">{{ t('receipt.review_receipt') }}</h5>
+    <div class="text-secondary small">{{ t('review.help') }}</div>
+  </div>
   <div class="d-flex gap-2">
     <button class="btn btn-secondary btn-sm" onclick="history.back()">{{ t('common.cancel') }}</button>
-    <button class="btn btn-success btn-sm" onclick="confirmAll()">{{ t('receipt.save_all') }}</button>
+    <button class="btn btn-success btn-sm px-3" onclick="confirmAll()">
+      <i class="bi bi-check2"></i> {{ t('receipt.save_all') }}
+    </button>
   </div>
 </div>
 
 <div id="review-container">
 {% for result in results %}
-<div class="card bg-dark border-secondary mb-4">
+<div class="card bg-dark border-secondary mb-4 receipt-card" data-total="{{ result.total or '' }}">
   <div class="card-header d-flex align-items-center gap-3 border-secondary">
     <img src="/temp/{{ session_id }}/{{ result.image }}"
          onclick="showReceipt('/temp/{{ session_id }}/{{ result.image }}')"
          title="{{ t('receipt.click_to_enlarge') }}"
          style="height:80px;border-radius:4px;cursor:zoom-in" onerror="this.style.display='none'">
-    {% if result['items']|length == 0 %}
-      <span class="badge bg-warning text-dark">{{ t('receipt.no_items_recognized') }}</span>
-    {% else %}
-      <span class="text-secondary small">{{ result['items']|length }}{{ t('receipt.items_count_suffix') }}</span>
-    {% endif %}
+    <div class="flex-grow-1 min-w-0">
+      <div class="small text-white text-truncate">{{ result.name }}</div>
+      {% if result['items']|length == 0 %}
+        <span class="badge bg-warning text-dark text-wrap">{{ t('receipt.no_items_recognized') }}</span>
+      {% else %}
+        <span class="text-secondary small">{{ result['items']|length }}{{ t('receipt.items_count_suffix') }}</span>
+        {# Filled by checkTotals(): printed total vs. the (edited) item amounts #}
+        <div class="receipt-total small mt-1"></div>
+      {% endif %}
+    </div>
   </div>
   <div class="card-body p-2">
     {% for item in result['items'] %}
-    <div class="review-item border border-secondary rounded p-2 mb-2" data-image="{{ result.image }}">
-      <div class="row g-2">
-        <div class="col-md-2">
-          <input type="date" class="form-control form-control-sm bg-dark text-white border-secondary field-date" value="{{ item.date or '' }}">
+    <div class="review-item" data-image="{{ result.image }}"
+         data-major="{{ item.major or '' }}" data-minor="{{ item.minor or '' }}" data-sub="{{ item.sub or '' }}">
+      <!-- line 1: what was bought -->
+      <div class="row g-2 align-items-center">
+        <div class="col-6 col-md-2">
+          <input type="date" title="{{ t('common.date') }}"
+                 class="form-control form-control-sm field-date" value="{{ item.date or '' }}">
         </div>
-        <div class="col-md-1">
-          <select class="form-select form-select-sm bg-dark text-white border-secondary field-type">
+        <div class="col-6 col-md-1">
+          <select class="form-select form-select-sm field-type" title="{{ t('common.type') }}" onchange="reviewLoadMajor(this)">
             <option value="지출" {% if item.type=='지출' %}selected{% endif %}>{{ cat_label('지출') }}</option>
             <option value="수입" {% if item.type=='수입' %}selected{% endif %}>{{ cat_label('수입') }}</option>
           </select>
         </div>
-        <div class="col-md-2">
-          <select class="form-select form-select-sm bg-dark text-white border-secondary field-major" onchange="reviewLoadMinor(this)">
-            <option value=""></option>
-            {% set majors = categories|map(attribute='major')|unique|list %}
-            {% for m in majors %}
-            <option value="{{ m }}" {% if item.major==m %}selected{% endif %}>{{ cat_label(m) }}</option>
-            {% endfor %}
-          </select>
+        <div class="col-12 col-md-3">
+          <input type="text" class="form-control form-control-sm field-shop" value="{{ item.shop or '' }}" placeholder="{{ t('common.shop') }}">
         </div>
-        <div class="col-md-2">
-          <select class="form-select form-select-sm bg-dark text-white border-secondary field-minor">
-            <option value="{{ item.minor or '' }}">{{ cat_label(item.minor or '') }}</option>
-          </select>
+        <div class="col-12 col-md-4">
+          <input type="text" class="form-control form-control-sm text-white field-item" value="{{ item.item or '' }}" placeholder="{{ t('receipt.item_name') }}">
         </div>
-        <div class="col-md-2">
-          <select class="form-select form-select-sm bg-dark text-white border-secondary field-sub">
-            <option value="{{ item.sub or '' }}">{{ cat_label(item.sub or '') }}</option>
-          </select>
+        <div class="col-12 col-md-2">
+          <input type="number" class="form-control form-control-sm text-end field-amount" value="{{ item.amount or '' }}" placeholder="{{ t('common.amount') }}">
         </div>
-        <div class="col-md-3">
-          <input type="text" class="form-control form-control-sm bg-dark text-white border-secondary field-shop" value="{{ item.shop or '' }}" placeholder="{{ t('common.shop') }}">
+      </div>
+      <!-- line 2: category cascade (options built by review.js from data-major/minor/sub) -->
+      <div class="row g-2 align-items-center mt-0">
+        <div class="col-auto"><span class="review-tag"><i class="bi bi-tags"></i> {{ t('review.category') }}</span>
+          {% if item.cat_from == 'history' %}<span class="review-hist" title="{{ t('review.from_history_tip') }}"><i class="bi bi-clock-history"></i> {{ t('review.from_history') }}</span>{% endif %}
         </div>
-        <div class="col-md-6">
-          <input type="text" class="form-control form-control-sm bg-dark text-white border-secondary field-item" value="{{ item.item or '' }}" placeholder="{{ t('receipt.item_name') }}">
+        <div class="col">
+          <select class="form-select form-select-sm field-major" data-placeholder="{{ t('uncat.major') }}" onchange="reviewLoadMinor(this)"></select>
         </div>
-        <div class="col-md-2">
-          <input type="number" class="form-control form-control-sm bg-dark text-white border-secondary field-amount" value="{{ item.amount or '' }}" placeholder="{{ t('common.amount') }}">
+        <div class="col">
+          <select class="form-select form-select-sm field-minor" data-placeholder="{{ t('uncat.minor') }}" onchange="reviewLoadSub(this)"></select>
         </div>
-        <div class="col-md-1 d-flex align-items-center">
-          <button class="btn btn-sm btn-outline-danger" onclick="this.closest('.review-item').remove()"><i class="bi bi-trash"></i></button>
+        <div class="col">
+          <select class="form-select form-select-sm field-sub" data-placeholder="{{ t('review.sub') }}"></select>
+        </div>
+        <div class="col-auto">
+          <button class="btn btn-sm btn-outline-danger" title="{{ t('review.remove_row') }}"
+                  onclick="this.closest('.review-item').remove()"><i class="bi bi-trash"></i></button>
         </div>
       </div>
     </div>
@@ -80,23 +90,6 @@
 <script>
 const allCats = {{ categories|tojson }};
 const sessionId = "{{ session_id }}";
-
-function reviewLoadMinor(majorSel) {
-  const item  = majorSel.closest('.review-item');
-  const major = majorSel.value;
-  const minors = [...new Set(allCats.filter(c => c.major === major).map(c => c.minor))];
-  const minorSel = item.querySelector('.field-minor');
-  minorSel.innerHTML = '<option value=""></option>' + minors.map(m => `<option value="${m}">${catLabel(m)}</option>`).join('');
-  reviewLoadSub(minorSel);
-}
-
-function reviewLoadSub(minorSel) {
-  const item  = minorSel.closest('.review-item');
-  const major = item.querySelector('.field-major').value;
-  const minor = minorSel.value;
-  const subs  = allCats.filter(c => c.major===major && c.minor===minor).map(c => c.sub);
-  item.querySelector('.field-sub').innerHTML = '<option value=""></option>' + subs.map(s => `<option value="${s}">${catLabel(s)}</option>`).join('');
-}
 
 function confirmAll() {
   const items = [];
@@ -121,5 +114,34 @@ function confirmAll() {
     window.location.href = '/transactions';
   });
 }
+</script>
+<script src="{{ url_for('static', filename='js/review.js') }}"></script>
+<script>
+// Compare each receipt's printed total with the sum of its rows, live while editing.
+const yen = n => '¥' + Math.round(n).toLocaleString();
+function checkTotals() {
+  document.querySelectorAll('.receipt-card').forEach(card => {
+    const out = card.querySelector('.receipt-total');
+    const total = parseFloat(card.dataset.total);
+    if (!out || !total) return;
+    let sum = 0;
+    card.querySelectorAll('.review-item .field-amount').forEach(i => sum += parseFloat(i.value) || 0);
+    const diff = Math.abs(sum) - total;
+    if (diff === 0) {
+      out.className = 'receipt-total small mt-1 text-success';
+      out.innerHTML = '<i class="bi bi-check-circle"></i> ' + {{ t('receipt.total_ok')|tojson }} + ' ' + yen(total);
+    } else {
+      out.className = 'receipt-total small mt-1 text-warning';
+      out.title = {{ t('receipt.total_mismatch_tip')|tojson }};
+      out.innerHTML = '<i class="bi bi-exclamation-triangle"></i> '
+        + {{ t('receipt.total_label')|tojson }} + ' ' + yen(total) + ' / '
+        + {{ t('receipt.items_sum')|tojson }} + ' ' + yen(Math.abs(sum)) + ' ('
+        + {{ t('receipt.total_diff')|tojson }} + ' ' + (diff > 0 ? '+' : '-') + yen(Math.abs(diff)) + ')';
+    }
+  });
+}
+document.addEventListener('DOMContentLoaded', checkTotals);
+document.addEventListener('input', e => { if (e.target.matches('.field-amount')) checkTotals(); });
+document.addEventListener('click', e => { if (e.target.closest('.btn-outline-danger')) setTimeout(checkTotals); });
 </script>
 {% endblock %}

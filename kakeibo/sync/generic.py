@@ -16,6 +16,8 @@ import datetime
 from bs4 import BeautifulSoup
 
 from .gmail_auth import get_gmail_service
+from ..dates import normalize_date
+from ..ai_items import clean_items, Refiner, DupFinder
 from ..ocr import gemini
 from ..i18n import t
 
@@ -97,11 +99,20 @@ def extract_text(payload) -> str:
     plain, html = [], []
     _collect(payload, plain, html)
     text = "".join(plain).strip()
-    if text:
-        return text
-    if html:
-        return BeautifulSoup("".join(html), "html.parser").get_text(separator="\n")
-    return ""
+    if not text and html:
+        soup = BeautifulSoup("".join(html), "html.parser")
+        # <style>/<script> text is not mail content, yet get_text() keeps it - on a
+        # styled shop mail the CSS alone used to fill most of the 8000-char AI budget.
+        for tag in soup(["style", "script", "head", "noscript"]):
+            tag.decompose()
+        text = soup.get_text(separator="\n")
+    return _squeeze(text)
+
+
+def _squeeze(text: str) -> str:
+    """Collapse layout whitespace (HTML tables leave long runs of blank lines/spaces)."""
+    text = re.sub(r"[ \t　\xa0]+", " ", text or "")
+    return re.sub(r"\s*\n\s*", "\n", text).strip()
 
 
 def _header(payload, name: str) -> str:
@@ -111,25 +122,50 @@ def _header(payload, name: str) -> str:
     return ""
 
 
-def _build_prompt(sender: str, subject: str, body: str, order_date: str) -> str:
+# Longest item name kept on the row; a longer shop title (Amazon's SEO listings run to
+# 150+ chars) is shortened by the model and the full title goes to the note.
+ITEM_NAME_MAX = 40
+
+
+def known_shops(conn, limit: int = 40) -> list:
+    """Shop names the user already has for mail imports, most used first.
+
+    Handed to the model so one shop keeps one name ('Octopus Energy' and
+    'オクトパスエナジー' used to arrive as two shops, splitting stats and history).
+    """
+    return [r[0] for r in conn.execute(
+        "SELECT shop FROM transactions WHERE source='email' AND deleted_at IS NULL "
+        "AND shop != '' GROUP BY shop ORDER BY COUNT(*) DESC LIMIT ?", (limit,)) if r[0]]
+
+
+def _build_prompt(sender: str, subject: str, body: str, order_date: str,
+                  shops: list = None) -> str:
     cats = gemini.categories_text()
     # If the body is too long, truncate it to save tokens
     body = body[:8000]
+    shop_rule = ""
+    if shops:
+        shop_rule = ("- 아래 [기존 가게 이름] 에 같은 가게(표기만 다른 것 포함: 가타카나/영문, "
+                     "'オンラインストア' 유무 등)가 있으면 그 이름을 글자 그대로 써라.\n")
+    shop_list = f"\n[기존 가게 이름]\n{', '.join(shops)}\n" if shops else ""
     return f"""너는 가계부 앱의 메일 파서다. 아래는 수신한 이메일 한 통이다.
 이게 '실제 구매/결제 내역'(주문확인, 발송알림, 영수증, 결제완료 등)이면 구매 품목을 JSON 배열로 추출해라.
 광고/뉴스레터/배송상태만 알리는 등 금액이 없는 메일이면 빈 배열 [] 을 반환해라.
 
 [규칙]
-- 각 품목을 한 원소로: date, type, major, minor, sub, shop, item, amount
+- 각 품목을 한 원소로: date, type, major, minor, sub, shop, item, amount, note
 - amount 는 엔(¥) 정수. 지출은 음수, 환불/적립/수입은 양수.
 - 배송비(送料), 할인(割引/ディスカウント), 소비税(消費税)도 각각 별도 항목으로 넣어
   모든 amount 의 합이 '주문합계/ご請求金額/注文合計' 과 일치하게 해라.
   (할인은 지출을 줄이므로 양수 amount)
+- item 은 {ITEM_NAME_MAX}자 이내의 짧은 상품명(원어 그대로, 브랜드 + 무엇인지 + 핵심 규격).
+  검색용 수식어(対応/おすすめ/送料無料 같은 문구, 사이즈 나열 등)는 빼라.
+  줄였다면 원래 상품명 전체를 note 에 넣고, 안 줄였으면 note 는 "".
 - shop 은 판매처명(원어 그대로). 알 수 없으면 발신 도메인 사용.
-- date 는 구매/주문일(YYYY-MM-DD). 본문에 없으면 {order_date} 사용.
+{shop_rule}- date 는 구매/주문일(YYYY-MM-DD). 본문에 없거나 연도가 불확실하면 {order_date} 사용.
 - type 은 지출 또는 수입.
 - major/minor/sub 는 아래 분류 체계에서 골라라. 적절한 게 없으면 minor/sub 는 "".
-
+{shop_list}
 [사용 가능한 분류 체계]
 {cats}
 
@@ -142,59 +178,50 @@ def _build_prompt(sender: str, subject: str, body: str, order_date: str) -> str:
 JSON 배열만 출력해라."""
 
 
-def parse_email_ai(sender: str, subject: str, body: str, msg_date_ms: int) -> list:
+def parse_email_ai(sender: str, subject: str, body: str, msg_date_ms: int,
+                   shops: list = None) -> list:
     """Use the AI to extract a list of transaction items from the mail. Returns [] if it is not a purchase email."""
     dt = datetime.datetime.fromtimestamp(msg_date_ms / 1000)
     order_date = f"{dt.year}-{dt.month:02d}-{dt.day:02d}"
 
     try:
-        data = gemini.generate_json(_build_prompt(sender, subject, body, order_date))
-    except gemini.QuotaError:
-        raise  # Quota exceeded is caught by the caller (sync_generic), which stops the sync
+        # Mail sync runs on a background thread -> wait out capacity spikes properly
+        data = gemini.generate_json(_build_prompt(sender, subject, body, order_date, shops),
+                                    backoff=gemini.OVERLOAD_BACKOFF_BG,
+                                    schema=gemini.ITEMS_SCHEMA)
+    except (gemini.QuotaError, gemini.OverloadError, gemini.ModelError):
+        raise  # Quota / model-busy / bad model is caught by the caller, which stops the sync
     except Exception as e:
-        print(f"[generic] AI 파싱 오류: {e}")
+        print(f"[generic] AI parse error: {type(e).__name__}")   # ASCII only (cp949)
         return []
-    if not data:
-        return []
-    if isinstance(data, dict):
-        data = [data]
-
-    items = []
-    for d in data:
-        if not isinstance(d, dict):
-            continue
-        try:
-            amount = int(round(float(d.get("amount", 0))))
-        except (ValueError, TypeError):
-            continue
-        if amount == 0:
-            continue
-        item_name = str(d.get("item", "")).strip()
-        if not item_name:
-            continue
-        items.append({
-            "date":   str(d.get("date") or order_date)[:10],
-            "type":   str(d.get("type") or ("수입" if amount > 0 else "지출")),
-            "major":  str(d.get("major", "")).strip(),
-            "minor":  str(d.get("minor", "")).strip(),
-            "sub":    str(d.get("sub", "")).strip(),
-            "shop":   str(d.get("shop", "")).strip() or sender,
-            "item":   item_name,
-            "amount": amount,
-        })
-    return items
+    return clean_items(data, fallback_date=order_date, default_shop=sender)
 
 
-def collect_generic(conn, days: int = None, query: str = None, max_results: int = None) -> dict:
+def collect_generic(conn, days: int = None, query: str = None, max_results: int = None,
+                    on_progress=None) -> dict:
     """Fetch + pre-filter + AI-parse purchase mails, WITHOUT inserting.
 
     Returns parsed items grouped per email so the caller can render a review page
     and let the user pick which to add. Already-imported gmail_ids and the cheap
     pre-filter are dropped before any AI call, exactly as before.
 
+    `on_progress(event)` is called as the sync advances so a UI can show what is
+    happening (this can take minutes: one AI call per purchase mail). Events are
+    plain dicts with a `stage` key: connect / list / read / skip / analyze / parsed
+    / quota / done. Never raises out of the callback.
+
     Returns: {emails, scanned, skipped, quota, quota_exceeded} or {error, ...}.
     Each email = {gmail_id, sender, subject, date, items:[{date,type,major,minor,sub,shop,item,amount}]}.
     """
+    def emit(stage, **info):
+        if not on_progress:
+            return
+        try:
+            on_progress(dict(stage=stage, **info))
+        except Exception:
+            pass   # progress reporting must never break the sync
+
+    emit('connect')
     try:
         service = get_gmail_service()
     except Exception as e:
@@ -202,7 +229,11 @@ def collect_generic(conn, days: int = None, query: str = None, max_results: int 
 
     if days is None:
         row = conn.execute("SELECT value FROM settings WHERE key='mail_sync_days'").fetchone()
-        days = int(row["value"]) if row else 30
+        try:
+            days = int(row["value"]) if row and str(row["value"]).strip() else 30
+        except (ValueError, TypeError):
+            days = 30
+        days = max(1, days)
 
     # How many mails to fetch from Gmail per sync (setting, default 200). The cheap
     # pre-filter runs before any AI call, so a larger fetch mostly costs a Gmail list
@@ -225,6 +256,7 @@ def collect_generic(conn, days: int = None, query: str = None, max_results: int 
     if not query:
         query = f"newer_than:{days}d ({' OR '.join(keywords)})"
 
+    emit('list', days=days)
     try:
         results = service.users().messages().list(
             userId="me", q=query, maxResults=max_results).execute()
@@ -233,24 +265,52 @@ def collect_generic(conn, days: int = None, query: str = None, max_results: int 
 
     messages = results.get("messages", [])
     if not messages:
+        emit('done', found=0, scanned=0, skipped=0, total=0)
         return {"emails": [], "scanned": 0, "skipped": 0}
 
-    # Filter out already-imported gmail_ids before calling the AI to save cost
+    # Skip mails already handled, so nothing is downloaded or AI-analyzed twice:
+    # imported ones (present in the ledger) plus the mail_seen table (filtered /
+    # parsed-to-nothing / already reviewed).
+    _drop_stale_filtered(conn, keywords, allow)
     existing = set(
         r[0] for r in conn.execute(
             "SELECT gmail_id FROM transactions "
             "WHERE gmail_id != '' AND gmail_id IS NOT NULL AND deleted_at IS NULL"
         ).fetchall() if r[0]
     )
+    existing |= set(r[0] for r in conn.execute("SELECT gmail_id FROM mail_seen").fetchall() if r[0])
 
     emails = []
     scanned = 0
-    skipped = 0
+    skipped = 0        # pre-filter said "not a purchase mail" (no AI call spent)
+    known = 0          # already imported or already handled in an earlier sync
     quota = None
-    for msg in messages:
+    overload = None
+    model_error = None
+    busy_streak = 0        # consecutive mails lost to 503; only a run of them stops the sync
+    active_model = gemini.get_model_id()
+    refiner = Refiner(conn)     # category history + scheme, loaded once per sync
+    on_paid = False             # whether the paid API key has taken over this run
+    shops = known_shops(conn)   # keep one name per shop across mails
+    since = (datetime.date.today()
+             - datetime.timedelta(days=days + DupFinder.WINDOW_DAYS)).isoformat()
+    dups = DupFinder(conn, since)   # same purchase already in the ledger / this batch
+    total = len(messages)
+    idx = 0
+    stopped_at = 0      # 1-based index of the mail the run stopped on (0 = ran to the end)
+
+    def prog():
+        """Counters as of right now (recomputed per emit, not snapshotted)."""
+        return dict(index=idx, total=total, found=len(emails), scanned=scanned,
+                    skipped=skipped, known=known)
+
+    for idx, msg in enumerate(messages, 1):
         mid = msg["id"]
         if mid in existing:
+            known += 1
+            emit('skip', reason='already', **prog())
             continue
+        emit('read', **prog())
         try:
             full = service.users().messages().get(
                 userId="me", id=mid, format="full").execute()
@@ -259,6 +319,11 @@ def collect_generic(conn, days: int = None, query: str = None, max_results: int 
         payload = full["payload"]
         body = extract_text(payload)
         if not body:
+            # Nothing readable (image-only / attachment-only mail): same verdict as the
+            # pre-filter, so remember it instead of downloading it again every sync.
+            skipped += 1
+            mark_seen(conn, [mid], 'filtered')
+            existing.add(mid)
             continue
         sender = _header(payload, "From")
         subject = _header(payload, "Subject")
@@ -267,15 +332,52 @@ def collect_generic(conn, days: int = None, query: str = None, max_results: int 
         # Pre-filter before calling the AI — skip if it does not look like a purchase email (saves quota)
         if not _looks_like_purchase(sender, subject, body, allow, keywords):
             skipped += 1
+            mark_seen(conn, [mid], 'filtered')
+            existing.add(mid)
+            emit('skip', reason='filtered', subject=subject, sender=sender, **prog())
             continue
 
         scanned += 1
+        emit('analyze', subject=subject, sender=sender, **prog())
         try:
-            items = parse_email_ai(sender, subject, body, ms)
+            items = parse_email_ai(sender, subject, body, ms, shops=shops)
         except gemini.QuotaError as e:
             quota = e           # Quota exceeded -> stop without calling more (already-processed items are saved)
+            stopped_at = idx
+            emit('quota', per_day=e.per_day, **prog())
             break
+        except gemini.OverloadError as e:
+            # Gemini itself is busy (503). One busy mail is not a reason to abandon the
+            # whole inbox: skip it (it stays unseen, so the next sync retries it) and
+            # carry on. Only a run of MAX_BUSY_STREAK failures means the model is truly
+            # down, and then we stop and keep whatever was parsed.
+            overload = e
+            busy_streak += 1
+            emit('overload', busy_streak=busy_streak, **prog())
+            if busy_streak >= MAX_BUSY_STREAK:
+                stopped_at = idx
+                break
+            continue
+        except gemini.ModelError as e:
+            # The configured model is gone (404). Every further mail would fail the
+            # same way, so stop at once instead of silently skipping the whole inbox.
+            model_error = e
+            stopped_at = idx
+            emit('model_error', **prog())
+            break
+        busy_streak = 0
+        items = dups.check(refiner.refine(items), mid)
+        if gemini.LAST_TIER == 'paid' and not on_paid:
+            on_paid = True                        # free quota spent, paid key took over
+            emit('tier_switch', **prog())
+        if gemini.LAST_MODEL and gemini.LAST_MODEL != active_model:
+            active_model = gemini.LAST_MODEL      # auto mode moved to another model
+            emit('model_switch', model=active_model, **prog())
+        emit('parsed', subject=subject, sender=sender, items=len(items), **prog())
         if not items:
+            # The AI read it and found no purchase — never spend a call on it again.
+            mark_seen(conn, [mid], 'no_items')
+            existing.add(mid)
             continue
         dt = datetime.datetime.fromtimestamp(ms / 1000)
         emails.append({
@@ -284,11 +386,97 @@ def collect_generic(conn, days: int = None, query: str = None, max_results: int 
             "subject": subject,
             "date": f"{dt.year}-{dt.month:02d}-{dt.day:02d}",
             "items": items,
+            # Kept so the user can read the source mail before adding anything,
+            # the way a receipt photo can be opened on its review page.
+            "body": body[:BODY_PREVIEW_CHARS],
+            "body_truncated": len(body) > BODY_PREVIEW_CHARS,
         })
         existing.add(mid)
 
-    return {"emails": emails, "scanned": scanned, "skipped": skipped,
-            "quota": quota, "quota_exceeded": bool(quota)}
+    # Mails the run never got to. `existing` grew as we went, so anything still unknown
+    # there is genuinely unprocessed — that is the "rest" the user is told to sync later.
+    # `stopped_at` is 1-based and the mail it names was NOT processed (quota/model
+    # error hit on it), so the slice starts at that mail itself.
+    left = ([m for m in messages[stopped_at - 1:] if m["id"] not in existing]
+            if stopped_at else [])
+    remaining = len(left)
+    # Subjects of the first few, so "some of them" is not a mystery. Metadata-only Gmail
+    # reads: no AI call, no quota cost — that is why it is safe after a quota stop.
+    remaining_samples = []
+    for m in left[:REMAINING_PREVIEW]:
+        try:
+            meta = service.users().messages().get(
+                userId="me", id=m["id"], format="metadata",
+                metadataHeaders=["Subject", "From"]).execute()
+            remaining_samples.append({
+                "subject": _header(meta["payload"], "Subject") or "(no subject)",
+                "sender": _header(meta["payload"], "From"),
+            })
+        except Exception:
+            break        # previewing must never break the sync result
+    emit('done', found=len(emails), scanned=scanned, skipped=skipped, known=known, total=total)
+    return {"emails": emails, "scanned": scanned, "skipped": skipped, "known": known,
+            "quota": quota, "quota_exceeded": bool(quota),
+            "overloaded": bool(overload) and busy_streak >= MAX_BUSY_STREAK,
+            "busy_skipped": bool(overload),
+            "model_error": str(model_error) if model_error else "",
+            "total": total, "examined": (stopped_at - 1) if stopped_at else total,
+            "remaining": remaining, "remaining_samples": remaining_samples}
+
+
+# How many mails in a row may fail with 503 before the sync gives up. Below this the
+# sync just skips the busy ones and keeps going.
+MAX_BUSY_STREAK = 3
+
+# How many of the not-yet-processed mails are previewed by subject when a run stops
+# early, so the user can see what "the rest" actually is.
+REMAINING_PREVIEW = 10
+
+# How much of the mail text is kept for the review page's "original mail" view. The
+# staged session is a JSON file, so the whole inbox must not end up in it.
+BODY_PREVIEW_CHARS = 4000
+
+
+def mark_seen(conn, gmail_ids, reason: str) -> None:
+    """Remember mails that must not be fetched/analyzed again.
+
+    A gmail_id lands in `transactions` only when an item is actually saved, so
+    without this table every sync re-downloads and re-analyzes the same mails that
+    were filtered out, parsed to nothing, or left unchecked on the review page.
+
+    reason: 'filtered' (pre-filter, no AI call) | 'no_items' (AI found nothing) |
+            'reviewed' (shown on the review page, saved or not).
+    """
+    ids = [str(g) for g in gmail_ids if g]
+    if not ids:
+        return
+    now = datetime.datetime.now().isoformat(timespec="seconds")
+    conn.executemany(
+        "INSERT INTO mail_seen (gmail_id, reason, seen_at) VALUES (?,?,?) "
+        "ON CONFLICT(gmail_id) DO UPDATE SET reason=excluded.reason, seen_at=excluded.seen_at",
+        [(g, reason, now) for g in ids])
+    conn.commit()
+
+
+def _filter_fingerprint(keywords, allow) -> str:
+    """Identity of the current pre-filter config, so 'filtered' can be re-evaluated."""
+    return repr((sorted(keywords), sorted(allow)))
+
+
+def _drop_stale_filtered(conn, keywords, allow) -> None:
+    """Forget 'filtered' mails when the keyword/sender settings changed.
+
+    Those were skipped by the old rules; under new rules they deserve another look.
+    'no_items' / 'reviewed' entries are unaffected — the AI already saw them.
+    """
+    fp = _filter_fingerprint(keywords, allow)
+    row = conn.execute("SELECT value FROM settings WHERE key='mail_filter_fingerprint'").fetchone()
+    if row and row["value"] == fp:
+        return
+    conn.execute("DELETE FROM mail_seen WHERE reason='filtered'")
+    conn.execute("INSERT INTO settings (key,value) VALUES ('mail_filter_fingerprint',?) "
+                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (fp,))
+    conn.commit()
 
 
 def insert_email_items(conn, items: list) -> int:
@@ -319,7 +507,8 @@ def insert_email_items(conn, items: list) -> int:
         if not item_name:
             continue
         rows.append({
-            "date": str(it.get("date") or "")[:10],
+            # Keep a date the user typed on the review page; only fill in a blank/broken one.
+            "date": normalize_date(it.get("date"), fix_year=False),
             "type": str(it.get("type") or ("수입" if amount > 0 else "지출")),
             "major": str(it.get("major", "")).strip(),
             "minor": str(it.get("minor", "")).strip(),
@@ -327,7 +516,7 @@ def insert_email_items(conn, items: list) -> int:
             "shop": str(it.get("shop", "")).strip(),
             "item": item_name,
             "jpy_amount": amount, "krw_amount": None,
-            "note": "", "exchange_rate": None,
+            "note": str(it.get("note") or "").strip(), "exchange_rate": None,
             "source": "email", "gmail_id": gid,
         })
     if rows:
@@ -357,7 +546,21 @@ def sync_generic(conn, days: int = None, query: str = None, max_results: int = N
         cont = t('msg.cont.tomorrow_sync') if quota.per_day else t('msg.cont.later_sync')
         return {
             "new_count": n, "quota_exceeded": True,
-            "message": t('msg.mail_quota_stopped', n=n, limit=limit, cont=cont, skipped=skipped),
+            "message": t('msg.mail_quota_stopped', n=n, limit=limit, cont=cont, skipped=skipped,
+                         total=res.get("total", 0), done=res.get("examined", 0),
+                         remaining=res.get("remaining", 0)),
+        }
+    if res.get("overloaded"):
+        return {
+            "new_count": n, "overloaded": True,
+            "message": t('msg.mail_overload_stopped', n=n,
+                         total=res.get("total", 0), done=res.get("examined", 0),
+                         remaining=res.get("remaining", 0)),
+        }
+    if res.get("model_error"):
+        return {
+            "new_count": n, "model_error": True,
+            "message": t('msg.model_unavailable', model=gemini.get_model_id()),
         }
     if not res["emails"] and scanned == 0 and skipped == 0:
         return {"new_count": 0, "message": t('msg.no_new_mail')}

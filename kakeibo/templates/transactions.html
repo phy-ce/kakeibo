@@ -30,19 +30,57 @@
 </div>
 {% endif %}
 
+<!-- Headline numbers: what is left, what went out this month, what still needs sorting -->
+<div class="row g-2 mb-3 summary-row">
+  <div class="col-6 col-lg-3">
+    <div class="summary-card">
+      <div class="summary-label"><i class="bi bi-wallet2"></i> {{ t('tx.sum_balance') }}</div>
+      <div class="summary-value">{{ "¥{:,.0f}".format(summary.jpy) }}</div>
+      <div class="summary-sub">{{ "₩{:,.0f}".format(summary.krw) }}</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="summary-card">
+      <div class="summary-label"><i class="bi bi-arrow-up-right"></i> {{ t('tx.sum_expense', ym=summary.ym) }}</div>
+      <div class="summary-value text-danger">{{ "¥{:,.0f}".format(-summary.expense) }}</div>
+      <div class="summary-sub">{{ t('stats.net') }} <span class="{{ 'text-success' if summary.net >= 0 else 'text-danger' }}">{{ "¥{:,.0f}".format(summary.net) }}</span></div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="summary-card">
+      <div class="summary-label"><i class="bi bi-arrow-down-left"></i> {{ t('tx.sum_income', ym=summary.ym) }}</div>
+      <div class="summary-value text-success">{{ "¥{:,.0f}".format(summary.income) }}</div>
+      <div class="summary-sub">&nbsp;</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <a class="summary-card d-block text-decoration-none{% if summary.uncategorized %} summary-todo{% endif %}" href="{{ url_for('uncategorized') }}">
+      <div class="summary-label"><i class="bi bi-tags"></i> {{ t('tx.sum_uncat') }}</div>
+      <div class="summary-value {{ 'text-warning' if summary.uncategorized else 'text-secondary' }}">{{ summary.uncategorized }}</div>
+      <div class="summary-sub">{{ t('tx.sum_uncat_n', n=summary.uncategorized) if summary.uncategorized else t('tx.sum_uncat_none') }}</div>
+    </a>
+  </div>
+</div>
+
 <!-- Toolbar -->
 <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
 
   <!-- Filter -->
+  <div class="input-group input-group-sm tx-search">
+    <span class="input-group-text"><i class="bi bi-search"></i></span>
+    <input type="search" id="filter-q" class="form-control" placeholder="{{ t('tx.search') }}"
+           value="{{ filters.get('q', '') }}" onkeydown="if (event.key === 'Enter') applyFilter()">
+  </div>
+
   <select id="filter-ym" class="form-select form-select-sm w-auto" onchange="applyFilter()">
-    <option value="">{{ t('common.all') }}</option>
+    <option value="">{{ t('tx.all_periods') }}</option>
     {% for ym in year_months %}
     <option value="{{ ym }}" {% if filters.get('year') and filters.get('month') and '%s-%02d'|format(filters.year|int, filters.month|int) == ym %}selected{% endif %}>{{ ym }}</option>
     {% endfor %}
   </select>
 
   <select id="filter-type" class="form-select form-select-sm w-auto" onchange="applyFilter()">
-    <option value="">{{ t('common.all') }}</option>
+    <option value="">{{ t('tx.all_types') }}</option>
     <option value="지출" {% if filters.get('type')=='지출' %}selected{% endif %}>{{ cat_label('지출') }}</option>
     <option value="수입" {% if filters.get('type')=='수입' %}selected{% endif %}>{{ cat_label('수입') }}</option>
   </select>
@@ -63,6 +101,9 @@
     <option value="email"    {% if filters.get('source')=='email'    %}selected{% endif %}>{{ t('tx.mail_ai') }}</option>
     <option value="manual"   {% if filters.get('source')=='manual'   %}selected{% endif %}>{{ t('tx.manual') }}</option>
   </select>
+  {% if filters %}
+  <a class="btn btn-sm btn-link text-secondary px-1" href="{{ url_for('transactions') }}"><i class="bi bi-x-circle"></i> {{ t('tx.clear_filters') }}</a>
+  {% endif %}
 
   <div class="ms-auto d-flex gap-2 flex-wrap">
     <!-- Receipt upload -->
@@ -71,10 +112,6 @@
     </button>
     <input type="file" id="receipt-input" multiple accept="image/*" style="display:none" onchange="uploadReceipts(this)">
 
-    <!-- PayPay CSV -->
-    <button class="btn btn-sm btn-outline-light" onclick="document.getElementById('paypay-input').click()">
-      <i class="bi bi-credit-card"></i> PayPay
-    </button>
     <input type="file" id="paypay-input" accept=".csv" style="display:none" onchange="importPayPay(this)">
 
     <!-- Mail sync -->
@@ -82,10 +119,17 @@
       <i class="bi bi-envelope-arrow-down"></i> {{ t('tx.mail_sync') }}
     </button>
 
-    <!-- Exchange rate update -->
-    <button class="btn btn-sm btn-outline-info" onclick="fetchRates()">
-      <i class="bi bi-currency-exchange"></i> {{ t('tx.exchange_rate') }}
-    </button>
+    <!-- Less frequent actions -->
+    <div class="dropdown">
+      <button class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown">
+        <i class="bi bi-three-dots"></i> {{ t('tx.more') }}
+      </button>
+      <ul class="dropdown-menu dropdown-menu-end">
+        <li><button class="dropdown-item" onclick="document.getElementById('paypay-input').click()"><i class="bi bi-credit-card me-2"></i>{{ t('tx.paypay_csv') }}</button></li>
+        <li><button class="dropdown-item" onclick="fetchRates()"><i class="bi bi-currency-exchange me-2"></i>{{ t('tx.exchange_rate') }}</button></li>
+        <li><a class="dropdown-item" href="/api/export/excel"><i class="bi bi-file-excel me-2"></i>{{ t('tx.export') }}</a></li>
+      </ul>
+    </div>
 
     <!-- Manual add -->
     <button class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#tx-modal" onclick="openAddModal()">
@@ -96,25 +140,22 @@
     <button class="btn btn-sm btn-outline-danger" id="bulk-delete-btn" style="display:none" onclick="bulkDelete()">
       <i class="bi bi-trash"></i> {{ t('tx.delete_selected') }}
     </button>
-
-    <!-- Export -->
-    <a class="btn btn-sm btn-outline-secondary" href="/api/export/excel"><i class="bi bi-file-excel"></i> {{ t('tx.export') }}</a>
   </div>
 </div>
 
 {% macro tx_row(tx, item=false, gid=0) %}
 <tr id="row-{{ tx.id }}" data-id="{{ tx.id }}"{% if item %} class="rgroup-item g-{{ gid }}" style="display:none"{% endif %}>
   <td><input type="checkbox" class="form-check-input tx-check" value="{{ tx.id }}" onchange="updateBulkBtn()"></td>
-  <td class="text-secondary small{% if item %} ps-4{% endif %}">{{ tx.date }}</td>
-  <td>
+  <td class="text-secondary small text-nowrap{% if item %} ps-4{% endif %}">{{ tx.date }}</td>
+  <td class="d-none d-sm-table-cell">
     {% if tx.type == '지출' %}
       <span class="badge bg-danger-subtle text-danger-emphasis">{{ cat_label('지출') }}</span>
     {% else %}
       <span class="badge bg-success-subtle text-success-emphasis">{{ cat_label('수입') }}</span>
     {% endif %}
   </td>
-  <td class="small">
-    {{ tx.minor or '' }}
+  <td class="small d-none d-sm-table-cell">
+    {% if tx.major %}{{ cat_label(tx.minor) if tx.minor else '' }}{% else %}<a href="{{ url_for('uncategorized') }}" class="badge text-bg-warning text-decoration-none">{{ t('tx.sum_uncat') }}</a>{% endif %}
     {% if tx.source == 'amazon' %}<span class="badge bg-warning text-dark ms-1 small">amz</span>{% endif %}
     {% if tx.source == 'paypay' %}<span class="badge bg-primary ms-1 small">pay</span>{% endif %}
     {% if tx.source == 'receipt' and not item %}<span class="badge bg-secondary ms-1 small">rcpt</span>{% endif %}
@@ -130,12 +171,12 @@
       {% endif %}
     </div>
   </td>
-  <td class="text-end {% if (tx.jpy_amount or 0) < 0 %}text-danger{% else %}text-success{% endif %}">
+  <td class="text-end text-nowrap {% if (tx.jpy_amount or 0) < 0 %}text-danger{% else %}text-success{% endif %}">
     {{ "¥{:,.0f}".format(tx.jpy_amount or 0) }}
   </td>
-  <td class="text-end small text-secondary">{{ "¥{:,.0f}".format(tx.jpy_balance or 0) }}</td>
-  <td class="text-end small text-secondary">{{ "₩{:,.0f}".format(tx.krw_balance or 0) }}</td>
-  <td>
+  <td class="text-end small text-secondary d-none d-md-table-cell">{{ "¥{:,.0f}".format(tx.jpy_balance or 0) }}</td>
+  <td class="text-end small text-secondary d-none d-md-table-cell">{{ "₩{:,.0f}".format(tx.krw_balance or 0) }}</td>
+  <td class="text-nowrap">
     <button class="btn btn-link btn-sm p-0 text-secondary" onclick="openEditModal({{ tx.id }})"><i class="bi bi-pencil"></i></button>
     <button class="btn btn-link btn-sm p-0 text-danger ms-1" onclick="deleteTx({{ tx.id }})"><i class="bi bi-trash"></i></button>
   </td>
@@ -148,10 +189,11 @@
   <div class="month-group mb-3">
     <div class="month-header d-flex justify-content-between align-items-center py-2 px-3 rounded bg-dark border border-secondary cursor-pointer"
          onclick="toggleMonth('{{ ym }}')">
-      <span class="fw-bold text-white">{{ ym }}</span>
-      <span class="text-secondary small">
+      <span class="fw-bold text-white">{{ ym }} <span class="text-secondary fw-normal small ms-1">{{ t('tx.count_n', n=g.count) }}</span></span>
+      <span class="text-secondary small text-end">
         {{ cat_label('지출') }} <span class="text-danger">{{ "¥{:,.0f}".format(g.expense) }}</span>
         &nbsp;{{ cat_label('수입') }} <span class="text-success">{{ "¥{:,.0f}".format(g.income) }}</span>
+        <span class="d-none d-sm-inline">&nbsp;{{ t('stats.net') }} <span class="{{ 'text-success' if g.net >= 0 else 'text-danger' }}">{{ "¥{:,.0f}".format(g.net) }}</span></span>
       </span>
       <i class="bi bi-chevron-down" id="chevron-{{ ym }}"></i>
     </div>
@@ -162,12 +204,12 @@
           <tr>
             <th style="width:28px"><input type="checkbox" class="form-check-input" onchange="toggleMonthCheck('{{ ym }}', this)"></th>
             <th>{{ t('common.date') }}</th>
-            <th>{{ t('common.type') }}</th>
-            <th>{{ t('tx.minor') }}</th>
+            <th class="d-none d-sm-table-cell">{{ t('common.type') }}</th>
+            <th class="d-none d-sm-table-cell">{{ t('tx.minor') }}</th>
             <th>{{ t('tx.shop_item') }}</th>
             <th class="text-end">{{ t('tx.jpy') }}</th>
-            <th class="text-end">{{ t('tx.balance_jpy') }}</th>
-            <th class="text-end">{{ t('tx.balance_krw') }}</th>
+            <th class="text-end d-none d-md-table-cell">{{ t('tx.balance_jpy') }}</th>
+            <th class="text-end d-none d-md-table-cell">{{ t('tx.balance_krw') }}</th>
             <th style="width:60px"></th>
           </tr>
         </thead>
@@ -186,12 +228,12 @@
                 <input type="checkbox" class="form-check-input" onclick="event.stopPropagation()" onchange="toggleGroupCheck({{ u.gid }}, this)">
                 {% endif %}
               </td>
-              <td class="text-secondary small">{{ u.date }}</td>
-              <td>
+              <td class="text-secondary small text-nowrap">{{ u.date }}</td>
+              <td class="d-none d-sm-table-cell">
                 {% if u.total < 0 %}<span class="badge bg-danger-subtle text-danger-emphasis">{{ cat_label('지출') }}</span>
                 {% else %}<span class="badge bg-success-subtle text-success-emphasis">{{ cat_label('수입') }}</span>{% endif %}
               </td>
-              <td class="small"><span class="badge bg-secondary">📷 {{ t('tx.receipt') }}</span></td>
+              <td class="small d-none d-sm-table-cell"><span class="badge bg-secondary"><i class="bi bi-receipt"></i> {{ t('tx.receipt') }}</span></td>
               <td>
                 <div class="small fw-semibold d-flex align-items-center gap-2">
                   {% if not single %}<i class="bi bi-chevron-right" id="gchev-{{ u.gid }}"></i>{% endif %}
@@ -210,12 +252,12 @@
                   {% endif %}
                 </div>
               </td>
-              <td class="text-end fw-semibold {% if u.total < 0 %}text-danger{% else %}text-success{% endif %}">
+              <td class="text-end text-nowrap fw-semibold {% if u.total < 0 %}text-danger{% else %}text-success{% endif %}">
                 {{ "¥{:,.0f}".format(u.total) }}
               </td>
-              <td class="text-end small text-secondary">{{ "¥{:,.0f}".format(u.rows[-1].jpy_balance or 0) }}</td>
-              <td class="text-end small text-secondary">{{ "₩{:,.0f}".format(u.rows[-1].krw_balance or 0) }}</td>
-              <td>
+              <td class="text-end small text-secondary d-none d-md-table-cell">{{ "¥{:,.0f}".format(u.rows[-1].jpy_balance or 0) }}</td>
+              <td class="text-end small text-secondary d-none d-md-table-cell">{{ "₩{:,.0f}".format(u.rows[-1].krw_balance or 0) }}</td>
+              <td class="text-nowrap">
                 {% if single %}
                 <button class="btn btn-link btn-sm p-0 text-secondary" onclick="openEditModal({{ o.id }})"><i class="bi bi-pencil"></i></button>
                 <button class="btn btn-link btn-sm p-0 text-danger ms-1" onclick="deleteTx({{ o.id }})"><i class="bi bi-trash"></i></button>
@@ -335,6 +377,58 @@
   </div>
 </div>
 
+<!-- Mail AI sync progress (the run takes minutes: one AI call per purchase mail) -->
+<div class="modal fade" id="sync-modal" tabindex="-1" data-bs-backdrop="static">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content bg-dark border-secondary">
+      <div class="modal-header border-secondary py-2">
+        <h6 class="modal-title d-flex align-items-center gap-2">
+          <span class="spinner-border spinner-border-sm text-warning" id="sync-spinner"></span>
+          {{ t('sync.title') }}
+        </h6>
+      </div>
+      <div class="modal-body">
+        <!-- Asked before the run starts; hidden once it does -->
+        <div id="sync-ask">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="sync-auto"
+                   {% if get_setting('gemini_auto_model', '0') == '1' %}checked{% endif %}>
+            <label class="form-check-label small text-white" for="sync-auto">
+              {{ t('sync.auto_label') }}
+            </label>
+          </div>
+          <div class="text-secondary ms-4" style="font-size:0.75rem">{{ t('sync.auto_hint') }}</div>
+          <div class="d-flex justify-content-end gap-2 mt-3">
+            <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">{{ t('common.cancel') }}</button>
+            <button type="button" class="btn btn-sm btn-warning" onclick="startMailSync()">{{ t('sync.start') }}</button>
+          </div>
+        </div>
+        <div id="sync-run" style="display:none">
+        <div class="progress bg-black mb-2" style="height:6px">
+          <div id="sync-bar" class="progress-bar bg-warning" style="width:0%"></div>
+        </div>
+        <div id="sync-msg" class="small text-white text-break">{{ t('sync.connecting') }}</div>
+        <div id="sync-log" class="small text-secondary mt-2 border-top border-secondary pt-2"
+             style="max-height:150px;overflow-y:auto;display:none"></div>
+        <div class="row g-2 text-center mt-2">
+          <div class="col" title="{{ t('sync.tip_checked') }}"><div class="sync-stat"><div id="sync-checked">0</div><span>{{ t('sync.stat_checked') }}</span></div></div>
+          <div class="col" title="{{ t('sync.tip_analyzed') }}"><div class="sync-stat"><div id="sync-analyzed">0</div><span>{{ t('sync.stat_analyzed') }}</span></div></div>
+          <div class="col" title="{{ t('sync.tip_skipped') }}"><div class="sync-stat"><div id="sync-skipped">0</div><span>{{ t('sync.stat_skipped') }}</span></div></div>
+          <div class="col" title="{{ t('sync.tip_known') }}"><div class="sync-stat"><div id="sync-known">0</div><span>{{ t('sync.stat_known') }}</span></div></div>
+          <div class="col" title="{{ t('sync.tip_found') }}"><div class="sync-stat"><div id="sync-found" class="text-warning">0</div><span>{{ t('sync.stat_found') }}</span></div></div>
+        </div>
+        <div class="text-secondary mt-3" style="font-size:0.75rem">
+          <i class="bi bi-info-circle"></i> {{ t('sync.hint') }} {{ t('sync.background') }}
+        </div>
+        </div>
+      </div>
+      <div class="modal-footer border-secondary py-1">
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">{{ t('sync.close') }}</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Loading toast -->
 <div class="position-fixed bottom-0 end-0 p-3" style="z-index:9999">
   <div id="toast" class="toast align-items-center text-bg-dark border-secondary" role="alert">
@@ -383,7 +477,9 @@ function applyFilter() {
   const type   = document.getElementById('filter-type').value;
   const major  = document.getElementById('filter-major').value;
   const source = document.getElementById('filter-source').value;
+  const q      = document.getElementById('filter-q').value.trim();
   const params = new URLSearchParams();
+  if (q)      params.set('q', q);
   if (ym)     { const [y,m] = ym.split('-'); params.set('year', y); params.set('month', m); }
   if (type)   params.set('type', type);
   if (major)  params.set('major', major);
@@ -574,16 +670,99 @@ function importPayPay(input) {
     .then(d => { showToast(d.message || d.error); setTimeout(() => location.reload(), 1500); });
 }
 
-async function syncAllMail() {
-  showToast({{ t('tx.syncing_mail')|tojson }});
-  try {
-    const d = await fetch('/api/email/sync', {method:'POST'}).then(r => r.json());
-    if (d.review_url) { window.location.href = d.review_url; return; }   // go review before adding
-    showToast(d.message || d.error || {{ t('tx.done')|tojson }});
-  } catch(e) {
-    showToast({{ t('tx.mail_sync_error')|tojson }});
+// Mail sync runs in a background job; poll it so the user can see what the AI is doing.
+let syncModal = null;
+
+function syncSet(id, val) { document.getElementById(id).textContent = val; }
+
+function syncLog(msg) {
+  const box = document.getElementById('sync-log');
+  const line = document.createElement('div');
+  line.textContent = msg;
+  box.appendChild(line);
+  box.style.display = '';
+  box.scrollTop = box.scrollHeight;
+  while (box.childElementCount > 50) box.removeChild(box.firstChild);
+}
+
+function syncRender(d) {
+  const total = d.total || 0, index = d.index || 0;
+  document.getElementById('sync-bar').style.width =
+    (total ? Math.round(index / total * 100) : 5) + '%';
+  if (d.message) syncSet('sync-msg', d.message);
+  syncSet('sync-checked',  index);
+  syncSet('sync-analyzed', d.scanned || 0);
+  syncSet('sync-skipped',  d.skipped || 0);
+  syncSet('sync-known',    d.known || 0);
+  syncSet('sync-found',    d.found || 0);
+  // Keep a running list of the mails that actually produced items
+  if ((d.stage === 'parsed' || d.stage === 'model_switch' || d.stage === 'tier_switch')
+      && d.message && d.message !== syncRender.last) {
+    syncRender.last = d.message;
+    syncLog(d.message);
   }
-  setTimeout(() => location.reload(), 2000);
+}
+
+// Ask about auto model mode first; the run itself starts from startMailSync()
+function syncAllMail() {
+  const el = document.getElementById('sync-modal');
+  syncModal = bootstrap.Modal.getOrCreateInstance(el);
+  document.getElementById('sync-ask').style.display = '';
+  document.getElementById('sync-run').style.display = 'none';
+  document.getElementById('sync-spinner').style.display = 'none';
+  syncModal.show();
+}
+
+async function startMailSync() {
+  const auto = document.getElementById('sync-auto').checked;
+  document.getElementById('sync-ask').style.display = 'none';
+  document.getElementById('sync-run').style.display = '';
+  document.getElementById('sync-log').innerHTML = '';
+  document.getElementById('sync-log').style.display = 'none';
+  document.getElementById('sync-spinner').style.display = '';
+  document.getElementById('sync-bar').style.width = '0%';
+  syncRender({message: {{ t('sync.connecting')|tojson }}});
+
+  let start;
+  try {
+    start = await fetch('/api/email/sync', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({auto: auto})
+    }).then(r => r.json());
+  } catch (e) {
+    syncFail({{ t('tx.mail_sync_error')|tojson }});
+    return;
+  }
+  if (!start.job_id) { syncFail(start.error || {{ t('tx.mail_sync_error')|tojson }}); return; }
+
+  // Poll until the job finishes (it keeps running server-side even if this page is closed)
+  while (true) {
+    await new Promise(r => setTimeout(r, 800));
+    let d;
+    try {
+      d = await fetch('/api/email/sync/status/' + start.job_id).then(r => r.json());
+    } catch (e) { continue; }   // transient hiccup — keep polling
+    syncRender(d);
+    if (d.status === 'error') { syncFail(d.error || {{ t('tx.mail_sync_error')|tojson }}); return; }
+    if (d.status === 'done') {
+      document.getElementById('sync-spinner').style.display = 'none';
+      document.getElementById('sync-bar').style.width = '100%';
+      if (d.review_url) {
+        syncSet('sync-msg', {{ t('sync.go_review')|tojson }});
+        window.location.href = d.review_url;      // go review before adding
+      } else {
+        syncSet('sync-msg', d.message || {{ t('tx.done')|tojson }});
+        setTimeout(() => location.reload(), 2500);
+      }
+      return;
+    }
+  }
+}
+
+function syncFail(msg) {
+  document.getElementById('sync-spinner').style.display = 'none';
+  document.getElementById('sync-bar').classList.replace('bg-warning', 'bg-danger');
+  syncSet('sync-msg', {{ t('sync.failed')|tojson }} + ': ' + msg);
 }
 
 function fetchRates() {

@@ -26,6 +26,26 @@
           <div class="text-secondary" style="font-size:0.75rem">{{ t('settings.ai_model_help') }}</div>
         </div>
         <div class="mb-3">
+          <label class="form-label small">{{ t('settings.ai_keys') }}</label>
+          <div class="small">
+            {{ t('settings.key_free') }}
+            <span class="badge {{ 'text-bg-success' if key_free else 'text-bg-secondary' }}">{{ t('settings.key_set') if key_free else t('settings.key_unset') }}</span>
+            <span class="ms-2">{{ t('settings.key_paid') }}</span>
+            <span class="badge {{ 'text-bg-warning' if key_paid else 'text-bg-secondary' }}">{{ t('settings.key_set') if key_paid else t('settings.key_unset') }}</span>
+          </div>
+          <div class="text-secondary" style="font-size:0.75rem">{{ t('settings.key_help') }}</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label small">{{ t('settings.ai_fallback_model') }}</label>
+          <select id="ai-fallback" class="form-select form-select-sm bg-dark text-white border-secondary">
+            <option value="" {% if not current_fallback %}selected{% endif %}>{{ t('settings.ai_fallback_off') }}</option>
+            {% for mid, label in ai_models %}
+            <option value="{{ mid }}" {% if mid == current_fallback %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+          <div class="text-secondary" style="font-size:0.75rem">{{ t('settings.ai_fallback_help') }}</div>
+        </div>
+        <div class="mb-3">
           <label class="form-label small">{{ t('settings.mail_sync_days') }}</label>
           <input type="number" id="mail-days" class="form-control form-control-sm bg-dark text-white border-secondary"
                  value="{{ get_setting('mail_sync_days', '30') }}" min="1" max="90">
@@ -171,6 +191,7 @@ function saveSettings() {
       initial_jpy_balance: document.getElementById('init-jpy').value,
       initial_krw_balance:    document.getElementById('init-krw').value,
       gemini_model:           document.getElementById('ai-model').value,
+      gemini_fallback_model:  document.getElementById('ai-fallback').value,
       mail_sync_days:         document.getElementById('mail-days').value,
       mail_sync_max:          document.getElementById('mail-max').value,
       email_sender_allowlist: document.getElementById('mail-allow').value,

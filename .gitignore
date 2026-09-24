@@ -37,3 +37,6 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
+
+# Personal notes that may hold API keys - never commit
+gemini free.txt

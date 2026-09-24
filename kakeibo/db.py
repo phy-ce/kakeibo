@@ -126,6 +126,11 @@ def init_db():
             key   TEXT PRIMARY KEY,
             value TEXT
         );
+        CREATE TABLE IF NOT EXISTS mail_seen (
+            gmail_id TEXT PRIMARY KEY,
+            reason   TEXT DEFAULT '',
+            seen_at  TEXT DEFAULT ''
+        );
         CREATE INDEX IF NOT EXISTS idx_tx_date   ON transactions(date);
         CREATE INDEX IF NOT EXISTS idx_tx_source ON transactions(source);
     """)

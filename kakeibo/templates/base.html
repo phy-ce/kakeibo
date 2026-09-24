@@ -2,6 +2,7 @@
 <html lang="{{ current_lang() }}" data-bs-theme="dark">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Kakeibo</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
@@ -9,13 +10,13 @@
 </head>
 <body>
 
-<nav class="navbar navbar-dark bg-dark border-bottom border-secondary px-3">
+<nav class="navbar navbar-dark bg-dark border-bottom border-secondary px-3 app-nav">
   <a class="navbar-brand fw-bold text-warning" href="/">Kakeibo</a>
-  <div class="d-flex gap-3">
+  <div class="d-flex gap-3 app-nav-links">
     <a class="nav-link {% if request.endpoint=='transactions' %}text-white fw-bold{% else %}text-secondary{% endif %}" href="{{ url_for('transactions') }}">{{ t('nav.transactions') }}</a>
     <a class="nav-link {% if request.endpoint=='uncategorized' %}text-white fw-bold{% else %}text-secondary{% endif %}" href="{{ url_for('uncategorized') }}">
       {{ t('nav.uncategorized') }}
-      <span id="uncategorized-badge" class="badge bg-danger ms-1" style="display:none"></span>
+      {% if uncategorized_count %}<span class="badge bg-danger ms-1">{{ uncategorized_count }}</span>{% endif %}
     </a>
     <a class="nav-link {% if request.endpoint=='stats' %}text-white fw-bold{% else %}text-secondary{% endif %}" href="{{ url_for('stats') }}">{{ t('nav.stats') }}</a>
     <a class="nav-link {% if request.endpoint=='budget' %}text-white fw-bold{% else %}text-secondary{% endif %}" href="{{ url_for('budget') }}">{{ t('nav.budget') }}</a>
@@ -24,7 +25,7 @@
   </div>
 </nav>
 
-<main class="container-fluid py-3 px-4">
+<main class="container-fluid py-3 px-3 px-md-4">
   {% block content %}{% endblock %}
 </main>
 
@@ -38,7 +39,6 @@
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script src="{{ url_for('static', filename='js/main.js') }}"></script>
 <script>
 // Category value -> localized label (empty in ko; used by JS-built category dropdowns)
 window.CAT_LABELS = {{ category_map()|tojson }};
