@@ -105,6 +105,15 @@ body {
   white-space: nowrap;
 }
 
+/* Per-photo status on the receipt stage page */
+.photo-state {
+  position: absolute;
+  left: 0.25rem;
+  bottom: 0.25rem;
+  font-size: 0.7rem;
+  box-shadow: 0 0 6px #000;
+}
+
 /* Amounts read as numbers, not text */
 .field-amount {
   font-variant-numeric: tabular-nums;

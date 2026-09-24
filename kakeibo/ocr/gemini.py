@@ -204,19 +204,20 @@ def _get_client(tier: str = "free"):
     return _clients[tier]
 
 
-def generate_json(contents, max_retries=3, backoff=None, schema=None):
+def generate_json(contents, max_retries=3, backoff=None, schema=None, on_retry=None):
     """Call the model -> parsed JSON (None if the response is empty).
 
     Tries the free key first and moves to the paid key (GEMINI_API_KEY_PAID, if
     set) only when the free tier answers 429. Busy (503) and retired-model (404)
     errors are not a quota problem, so they never move the call onto the paid key.
-    See _generate_on() for the per-key retry policy.
+    See _generate_on() for the per-key retry policy. `on_retry(seconds)` is called
+    before every wait, so a UI can say it is waiting rather than look frozen.
     """
     global LAST_TIER
     tiers = _tiers()
     for i, tier in enumerate(tiers):
         try:
-            data = _generate_on(tier, contents, max_retries, backoff, schema)
+            data = _generate_on(tier, contents, max_retries, backoff, schema, on_retry)
             LAST_TIER = tier
             return data
         except QuotaError as e:
@@ -227,7 +228,7 @@ def generate_json(contents, max_retries=3, backoff=None, schema=None):
     return None
 
 
-def _generate_on(tier, contents, max_retries=3, backoff=None, schema=None):
+def _generate_on(tier, contents, max_retries=3, backoff=None, schema=None, on_retry=None):
     """Call the model with one key (text/[image, prompt]) -> return parsed JSON. None if the response is empty.
 
     Every model call in the app goes through here, so retry policy lives in one place:
@@ -258,6 +259,14 @@ def _generate_on(tier, contents, max_retries=3, backoff=None, schema=None):
     # Quota is per project, so model cooldowns are tracked per tier.
     def _cool(model, seconds):
         _cooldown[f"{tier}:{model}"] = time.time() + seconds
+
+    def _wait(seconds):
+        if on_retry:
+            try:
+                on_retry(seconds)
+            except Exception:
+                pass     # progress reporting must never break the call
+        time.sleep(seconds)
 
     models = _model_chain(tier)
     auto = len(models) > 1 and auto_model_enabled()
@@ -298,7 +307,7 @@ def _generate_on(tier, contents, max_retries=3, backoff=None, schema=None):
                         break
                     # Per-minute limit with a short wait -> retry; otherwise let the caller stop
                     if (not per_day) and attempt < max_retries and retry_after <= 8:
-                        time.sleep(retry_after + 1)
+                        _wait(retry_after + 1)
                         continue
                     raise last_quota
                 if _is_model_error(msg):
@@ -319,7 +328,7 @@ def _generate_on(tier, contents, max_retries=3, backoff=None, schema=None):
                         # Jitter so parallel/consecutive calls do not all retry in lockstep
                         wait = waits[attempt] * random.uniform(0.8, 1.3)
                         print(f"[gemini] model busy ({model}), retrying in {wait:.0f}s")
-                        time.sleep(wait)
+                        _wait(wait)
                         continue
                     break            # exhausted this model -> try the fallback, if any
                 raise
@@ -402,7 +411,7 @@ def load_photo(image_path: str, max_dim: int = OCR_MAX_DIM) -> Image.Image:
     return img
 
 
-def analyze_receipt(image_path: str) -> dict:
+def analyze_receipt(image_path: str, on_retry=None) -> dict:
     """OCR one receipt photo -> {"items": [raw item dicts], "total": int | None}.
 
     Items are the model's raw output; the caller runs them through
@@ -440,7 +449,7 @@ def analyze_receipt(image_path: str) -> dict:
 위 분류 중 적절한 게 없으면 minor/sub 는 빈 문자열로 둬.
 """
         # Same retry/fallback path as mail parsing (429 + 503 handling lives there)
-        data = generate_json([image, prompt], schema=RECEIPT_SCHEMA)
+        data = generate_json([image, prompt], schema=RECEIPT_SCHEMA, on_retry=on_retry)
         if isinstance(data, dict) and isinstance(data.get("items"), list):
             total = data.get("total")
             return {"items": data["items"],

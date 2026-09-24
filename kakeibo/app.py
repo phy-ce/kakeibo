@@ -659,18 +659,83 @@ def receipt_stage(session_id):
 
 @app.route('/api/receipts/analyze', methods=['POST'])
 def api_analyze():
-    """Step 2: Run OCR (AI) analysis only on the photos selected on the confirmation screen."""
+    """Step 2: start OCR (AI) on the photos selected on the confirmation screen.
+
+    Runs as a background job (one AI call per photo, plus retry waits when the model
+    is busy, easily a minute or more); the page polls
+    /api/receipts/analyze/status/<job_id> for per-photo progress.
+    """
     d          = request.json or {}
     session_id = d.get('session_id')
-    selected   = set(d.get('selected', []))   # list of 'saved' tokens
+    selected   = [s for s in d.get('selected', []) if s]   # 'saved' tokens
 
     sf = _session_file(session_id)
     if not sf or not os.path.exists(sf):
         return jsonify({'error': 'Session expired'}), 400
+    if not selected:
+        return jsonify({'error': t('receipt.select_one')}), 400
+
+    now = time.time()
+    with _mail_jobs_lock:
+        # One run per upload batch: a double click must not analyze (and pay for) twice
+        for jid, job in _mail_jobs.items():
+            if (job.get('kind') == 'receipt' and job.get('status') == 'running'
+                    and job.get('session_id') == session_id):
+                return jsonify({'job_id': jid, 'already_running': True})
+        _drop_old_jobs(now)
+        job_id = uuid.uuid4().hex
+        _mail_jobs[job_id] = {'kind': 'receipt', 'status': 'running', 'session_id': session_id,
+                              'index': 0, 'total': len(selected), 'current': '',
+                              'message': '', 'photos': {s: {'state': 'wait'} for s in selected},
+                              'started_at': now}
+
+    threading.Thread(target=_run_receipt_job, args=(job_id, session_id, selected),
+                     daemon=True).start()
+    return jsonify({'job_id': job_id})
+
+
+@app.route('/api/receipts/analyze/status/<job_id>')
+def api_analyze_status(job_id):
+    """Live progress of a receipt-analyze job (polled by the stage page)."""
+    with _mail_jobs_lock:
+        job = _mail_jobs.get(job_id)
+        job = dict(job, photos=dict(job['photos'])) if job else None
+    if not job or job.get('kind') != 'receipt':
+        return jsonify({'error': t('msg.sync_job_gone')}), 404
+    out = {k: job.get(k) for k in ('status', 'index', 'total', 'current', 'message', 'photos')}
+    if job['status'] == 'done':
+        out.update(job.get('result') or {})
+        if (job.get('result') or {}).get('count'):
+            out['review_url'] = url_for('receipt_review', session_id=job['session_id'])
+    elif job['status'] == 'error':
+        out['error'] = job.get('error')
+    return jsonify(out)
+
+
+def _run_receipt_job(job_id, session_id, selected):
+    """Worker entry: the job must always leave 'running' (see _run_mail_sync)."""
+    try:
+        result = _analyze_receipts(job_id, session_id, set(selected))
+        _mail_job_update(job_id, status='done', result=result, finished_at=time.time())
+    except Exception as e:
+        _mail_job_update(job_id, status='error', error=str(e), finished_at=time.time())
+
+
+def _photo_state(job_id, saved, **state):
+    with _mail_jobs_lock:
+        job = _mail_jobs.get(job_id)
+        if job is not None:
+            job['photos'][saved] = state
+
+
+def _analyze_receipts(job_id, session_id, selected) -> dict:
+    """OCR the selected photos of a staged batch, reporting each one to the job."""
+    sf = _session_file(session_id)
     with open(sf, encoding='utf-8') as f:
         data = json.load(f)
     session_dir = data['session_dir']
 
+    todo = [s for s in data.get('staged', []) if s['saved'] in selected]
     results = []
     quota = None
     overloaded = False
@@ -679,11 +744,14 @@ def api_analyze():
     conn = get_db()
     refiner = Refiner(conn)     # history + scheme, loaded once per run
     conn.close()
-    for s in data.get('staged', []):
-        if s['saved'] not in selected:
-            continue
-        orig = os.path.join(session_dir, s['saved'])
+    for i, s in enumerate(todo, 1):
+        saved = s['saved']
+        _mail_job_update(job_id, index=i, current=saved,
+                         message=t('receipt.prog_analyzing', i=i, n=len(todo), name=s['name']))
+        _photo_state(job_id, saved, state='run')
+        orig = os.path.join(session_dir, saved)
         if not os.path.exists(orig):
+            _photo_state(job_id, saved, state='error')
             continue
         compressed_name = f"{uuid.uuid4()}.jpg"
         try:
@@ -692,13 +760,19 @@ def api_analyze():
             # Corrupt/unreadable photo: skip it rather than fail the whole batch
             # (and lose the photos already analyzed in this run).
             print(f"[receipt] cannot open image: {type(e).__name__}")  # ASCII only (cp949)
+            _photo_state(job_id, saved, state='error')
             continue
+
+        def on_retry(seconds, i=i):
+            _mail_job_update(job_id, message=t('receipt.prog_retry', i=i, n=len(todo),
+                                               s=int(round(seconds))))
         try:
-            ocr = gemini_ocr.analyze_receipt(orig)
+            ocr = gemini_ocr.analyze_receipt(orig, on_retry=on_retry)
         except gemini_ocr.QuotaError as e:
             # Quota exceeded → skip this photo and the rest. Keep the originals (retry possible).
             quota = e
             os.remove(os.path.join(session_dir, compressed_name))
+            _photo_state(job_id, saved, state='stopped')
             break
         except gemini_ocr.OverloadError:
             # Gemini is busy (503) even after retries. Skip just this photo — its
@@ -706,6 +780,7 @@ def api_analyze():
             # try the next one. Only a run of busy photos means the model is down.
             busy_streak += 1
             os.remove(os.path.join(session_dir, compressed_name))
+            _photo_state(job_id, saved, state='busy')
             if busy_streak >= MAX_BUSY_PHOTOS:
                 overloaded = True
                 break
@@ -715,6 +790,7 @@ def api_analyze():
             # the same way. Stop and point the user at the settings page.
             model_error = True
             os.remove(os.path.join(session_dir, compressed_name))
+            _photo_state(job_id, saved, state='stopped')
             break
         os.remove(orig)
         busy_streak = 0
@@ -722,6 +798,7 @@ def api_analyze():
         # categories from the user's history and the category scheme.
         items = refiner.refine(clean_items(ocr['items']))
         items_sum = sum(it['amount'] for it in items)
+        _photo_state(job_id, saved, state='ok' if items else 'empty', items=len(items))
         # status: ok (has items) / empty (OCR succeeded but 0 items -> make it explicit to the user)
         results.append({
             'image': compressed_name, 'name': s['name'], 'items': items,
@@ -731,23 +808,35 @@ def api_analyze():
             'mismatch': bool(ocr.get('total') and items and abs(items_sum) != ocr['total']),
         })
 
-    data['results'] = results
+    # Photos left untouched by an early stop stay selectable for the next run
+    with _mail_jobs_lock:
+        job = _mail_jobs.get(job_id)
+        if job is not None:
+            for saved, st in job['photos'].items():
+                if st.get('state') == 'wait':
+                    st['state'] = 'stopped'
+
+    # Append: a second run (after a quota stop) must not drop the first run's results.
+    # Re-read the file so nothing written meanwhile is lost.
+    with open(sf, encoding='utf-8') as f:
+        data = json.load(f)
+    data['results'] = data.get('results', []) + results
     with open(sf, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False)
 
-    resp = {'session_id': session_id, 'count': len(results)}
+    resp = {'session_id': session_id, 'count': len(data['results']), 'new': len(results)}
     if quota:
         limit = t('msg.quota.per_day') if quota.per_day else t('msg.quota.per_min')
         cont = t('msg.cont.tomorrow') if quota.per_day else t('msg.cont.later')
-        resp['quota_exceeded'] = True
+        resp['stopped'] = True
         resp['message'] = t('msg.receipt_quota_stopped', n=len(results), limit=limit, cont=cont)
     elif overloaded:
-        resp['quota_exceeded'] = True    # same client handling: stop and tell the user why
+        resp['stopped'] = True
         resp['message'] = t('msg.receipt_overload_stopped', n=len(results))
     elif model_error:
-        resp['quota_exceeded'] = True    # same client handling: stop and tell the user why
+        resp['stopped'] = True
         resp['message'] = t('msg.model_unavailable', model=gemini_ocr.get_model_id())
-    return jsonify(resp)
+    return resp
 
 
 @app.route('/api/receipts/confirm', methods=['POST'])
@@ -887,8 +976,16 @@ def api_paypay():
 # The sync runs for minutes (one AI call per purchase mail), so it runs in a
 # background thread and the page polls the job for a live progress readout.
 _mail_jobs = {}                  # job_id -> {status, stage, message, index, total, ...}
+                                 # (receipt-analyze jobs live here too, with kind='receipt')
 _mail_jobs_lock = threading.Lock()
 _MAIL_JOB_TTL = 900              # forget a finished job after 15 min
+
+
+def _drop_old_jobs(now):
+    """Forget finished jobs nobody polled for a while. Call with _mail_jobs_lock held."""
+    for jid in [k for k, v in _mail_jobs.items()
+                if v.get('finished_at') and now - v['finished_at'] > _MAIL_JOB_TTL]:
+        del _mail_jobs[jid]
 
 
 def _mail_job_update(job_id, **fields):
@@ -1035,12 +1132,9 @@ def api_email():
     with _mail_jobs_lock:
         # Only one sync at a time (it burns Gemini quota) — hand back the running one
         for jid, job in _mail_jobs.items():
-            if job.get('status') == 'running':
+            if job.get('kind', 'mail') == 'mail' and job.get('status') == 'running':
                 return jsonify({'job_id': jid, 'already_running': True})
-        # Drop finished jobs nobody polled for a while
-        for jid in [k for k, v in _mail_jobs.items()
-                    if v.get('finished_at') and now - v['finished_at'] > _MAIL_JOB_TTL]:
-            del _mail_jobs[jid]
+        _drop_old_jobs(now)
         job_id = uuid.uuid4().hex
         _mail_jobs[job_id] = {'status': 'running', 'stage': 'connect',
                               'message': t('sync.connecting'),

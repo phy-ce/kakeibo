@@ -53,7 +53,7 @@ One transaction (item) = one row. `source` values: `manual`/`paypay`/`receipt`/`
 ## Receipt input flow (3-step API)
 
 1. `POST /api/receipts/stage` — save photos (`~/.kakeibo/temp/{sid}/`), **flag duplicates by filename**. No OCR.
-2. On the confirm screen (`receipt_stage.html`) pick which photos to analyze → `POST /api/receipts/analyze` — only the selected ones are run through `compress_image` (longest side 1080/q65) then Gemini OCR. Stops on quota exceeded.
+2. On the confirm screen (`receipt_stage.html`) pick which photos to analyze → `POST /api/receipts/analyze` starts a **background job** (`_run_receipt_job` → `_analyze_receipts`, stored in `_mail_jobs` with `kind='receipt'`; a second POST for the same session returns the running job) and returns `{job_id}`. The page polls `GET /api/receipts/analyze/status/<job_id>` every 0.7s: progress bar, elapsed time, current message (incl. "model busy, retrying in N s" via `generate_json(on_retry=...)`), and a per-photo badge (`photos[saved].state`: wait/run/ok/empty/busy/error/stopped). Only the selected photos are run through `compress_image` (longest side 1080/q65) then Gemini OCR. Stops on quota exceeded; `stopped` + `message` explain why and the review link still opens what was analyzed. Results are **appended** to the session's `results`, so a second run after a stop keeps the first run's photos.
 3. Review (`receipt_review.html`) and edit → `POST /api/receipts/confirm` — INSERT one row per item, assign `receipt_id` (per photo) + `receipt_img` (whole group), and move the image to `uploads/receipts/`.
 
 Both review pages (`receipt_review.html`, `email_review.html`) share one row layout and `static/js/review.js`:

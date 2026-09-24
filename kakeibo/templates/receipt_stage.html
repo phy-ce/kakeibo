@@ -9,7 +9,25 @@
     <button class="btn btn-secondary btn-sm" onclick="location.href='/transactions'">{{ t('common.cancel') }}</button>
     <button class="btn btn-outline-light btn-sm" onclick="toggleAll(true)">{{ t('receipt.select_all') }}</button>
     <button class="btn btn-outline-light btn-sm" onclick="toggleAll(false)">{{ t('receipt.deselect_all') }}</button>
-    <button class="btn btn-success btn-sm" onclick="analyze()"><i class="bi bi-robot"></i> {{ t('receipt.start_analysis') }}</button>
+    <button class="btn btn-success btn-sm" id="analyze-btn" onclick="analyze()"><i class="bi bi-robot"></i> {{ t('receipt.start_analysis') }}</button>
+  </div>
+</div>
+
+<!-- Live progress of the analyze job (hidden until it starts) -->
+<div id="an-panel" class="card bg-dark border-secondary mb-3" style="display:none">
+  <div class="card-body py-2">
+    <div class="d-flex align-items-center gap-2 mb-2">
+      <span class="spinner-border spinner-border-sm text-warning" id="an-spinner"></span>
+      <span id="an-msg" class="small text-white text-break flex-grow-1">{{ t('receipt.prog_start') }}</span>
+      <span id="an-elapsed" class="small text-secondary text-nowrap"></span>
+    </div>
+    <div class="progress bg-black" style="height:6px">
+      <div id="an-bar" class="progress-bar bg-warning" style="width:3%"></div>
+    </div>
+    <div class="d-flex justify-content-between align-items-center mt-2 gap-2">
+      <div class="text-secondary" style="font-size:0.75rem"><i class="bi bi-info-circle"></i> {{ t('receipt.prog_hint') }}</div>
+      <a id="an-review" class="btn btn-sm btn-warning text-nowrap" style="display:none">{{ t('receipt.go_review') }}</a>
+    </div>
   </div>
 </div>
 
@@ -26,6 +44,7 @@
         {% if s.dup %}
         <span class="badge bg-warning text-dark position-absolute top-0 end-0 m-1">{{ t('receipt.duplicate') }}</span>
         {% endif %}
+        <span class="photo-state" id="st-{{ loop.index0 }}" style="display:none"></span>
       </div>
       <div class="card-body p-2">
         <div class="form-check">
@@ -52,22 +71,105 @@ function toggleAll(v) {
   document.querySelectorAll('.stage-check').forEach(c => c.checked = v);
 }
 
-function analyze() {
+// 'saved' token -> card index, so a status badge can be put on the right photo
+const cardBySaved = {};
+{% for s in staged %}cardBySaved[{{ s.saved|tojson }}] = {{ loop.index0 }};
+{% endfor %}
+
+const STATE = {
+  wait:    ['secondary', {{ t('receipt.st_wait')|tojson }}],
+  run:     ['warning',   {{ t('receipt.st_run')|tojson }}],
+  ok:      ['success',   {{ t('receipt.st_ok')|tojson }}],
+  empty:   ['secondary', {{ t('receipt.st_empty')|tojson }}],
+  busy:    ['danger',    {{ t('receipt.st_busy')|tojson }}],
+  error:   ['danger',    {{ t('receipt.st_error')|tojson }}],
+  stopped: ['dark',      {{ t('receipt.st_stopped')|tojson }}],
+};
+
+function paintPhotos(photos) {
+  Object.entries(photos || {}).forEach(([saved, st]) => {
+    const el = document.getElementById('st-' + cardBySaved[saved]);
+    const def = STATE[st.state];
+    if (!el || !def) return;
+    el.className = 'photo-state badge text-bg-' + def[0];
+    el.innerHTML = (st.state === 'run' ? '<span class="spinner-border spinner-border-sm me-1" style="width:.7rem;height:.7rem"></span>' : '')
+      + def[1].replace('{n}', st.items || 0);
+    el.style.display = '';
+  });
+}
+
+function setBusy(on) {
+  document.querySelectorAll('.stage-check, button').forEach(b => b.disabled = on);
+}
+
+function stopUi(msg, reviewUrl, failed) {
+  document.getElementById('an-spinner').style.display = 'none';
+  clearInterval(analyze.timer);
+  const bar = document.getElementById('an-bar');
+  bar.style.width = '100%';
+  if (failed) bar.classList.replace('bg-warning', 'bg-danger');
+  document.getElementById('an-msg').textContent = msg;
+  if (reviewUrl) {
+    const a = document.getElementById('an-review');
+    a.href = reviewUrl;
+    a.style.display = '';
+  }
+  setBusy(false);
+}
+
+async function analyze() {
   const selected = [...document.querySelectorAll('.stage-check:checked')].map(c => c.value);
   if (!selected.length) { alert({{ t('receipt.select_one')|tojson }}); return; }
-  const btn = event.target.closest('button');
-  if (btn) { btn.disabled = true; btn.innerHTML = {{ t('receipt.analyzing')|tojson }}; }
-  fetch('/api/receipts/analyze', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({session_id: sessionId, selected})
-  }).then(r => r.json()).then(d => {
-    if (d.error) { alert(d.error); if (btn){btn.disabled=false; btn.textContent={{ t('receipt.start_analysis')|tojson }};} return; }
-    if (d.quota_exceeded) {
-      alert(d.message);   // Quota exceeded notice (remaining photos are not analyzed)
-      if (!d.count) { if (btn){btn.disabled=false; btn.textContent={{ t('receipt.start_analysis')|tojson }};} return; }
+  setBusy(true);
+  document.getElementById('an-panel').style.display = '';
+  document.getElementById('an-review').style.display = 'none';
+  const t0 = Date.now();
+  const tick = () => document.getElementById('an-elapsed').textContent =
+    {{ t('receipt.prog_elapsed')|tojson }}.replace('{s}', Math.round((Date.now() - t0) / 1000));
+  tick();
+  analyze.timer = setInterval(tick, 1000);
+  paintPhotos(Object.fromEntries(selected.map(s => [s, {state: 'wait'}])));
+
+  let start;
+  try {
+    start = await fetch('/api/receipts/analyze', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({session_id: sessionId, selected})
+    }).then(r => r.json());
+  } catch (e) {
+    stopUi({{ t('receipt.prog_failed')|tojson }}, null, true); return;
+  }
+  if (!start.job_id) { stopUi(start.error || {{ t('receipt.prog_failed')|tojson }}, null, true); return; }
+
+  let misses = 0;
+  while (true) {
+    await new Promise(r => setTimeout(r, 700));
+    let d;
+    try {
+      d = await fetch('/api/receipts/analyze/status/' + start.job_id).then(r => r.json());
+      misses = 0;
+    } catch (e) {
+      if (++misses > 20) { stopUi({{ t('receipt.prog_failed')|tojson }}, null, true); return; }
+      continue;      // transient hiccup: keep polling
     }
-    window.location.href = `/receipt-review/${sessionId}`;
-  });
+    paintPhotos(d.photos);
+    const done = Object.values(d.photos || {}).filter(p => !['wait', 'run'].includes(p.state)).length;
+    document.getElementById('an-bar').style.width = Math.max(3, Math.round(done / (d.total || 1) * 100)) + '%';
+    if (d.message) document.getElementById('an-msg').textContent = d.message;
+
+    if (d.status === 'error') { stopUi({{ t('receipt.prog_failed')|tojson }} + ': ' + (d.error || ''), null, true); return; }
+    if (d.status === 'done') {
+      if (d.stopped) {        // quota / busy / retired model: say why, offer what was analyzed
+        stopUi(d.message, d.review_url, true);
+      } else if (d.review_url) {
+        stopUi({{ t('receipt.prog_done')|tojson }}, d.review_url, false);
+        window.location.href = d.review_url;
+      } else {
+        stopUi({{ t('receipt.no_items_recognized')|tojson }}, null, true);
+      }
+      return;
+    }
+  }
 }
 </script>
 {% endblock %}
