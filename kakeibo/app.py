@@ -53,6 +53,39 @@ app.jinja_env.globals['current_lang'] = i18n.current_lang
 app.jinja_env.globals['category_map'] = i18n.category_map
 
 
+# ── local-only guard ──────────────────────────────────────────────────────────
+# The app listens on 127.0.0.1, but any web page open in the same browser can still
+# send requests to it. Two checks close that:
+# - Host must be a loopback name: a DNS-rebinding page (its own domain resolving to
+#   127.0.0.1) arrives with its own Host and could otherwise READ the ledger/mails.
+# - State-changing requests from another origin are refused: plain form posts
+#   (multipart / text/plain) skip CORS preflight, so without this any site could
+#   replace credentials.json, import a fake PayPay CSV or start a mail sync.
+_LOCAL_HOSTS = {'localhost', '127.0.0.1', '[::1]', '::1'}
+
+
+def _host_only(value: str) -> str:
+    """'http://localhost:5000' / 'localhost:5000' / '[::1]:5000' -> hostname."""
+    v = (value or '').split('://', 1)[-1].split('/', 1)[0].lower()
+    if v.startswith('['):
+        return v.split(']', 1)[0] + ']'
+    return v.rsplit(':', 1)[0] if v.count(':') == 1 else v
+
+
+@app.before_request
+def _local_only():
+    if _host_only(request.host) not in _LOCAL_HOSTS:
+        return 'Forbidden host', 403
+    if request.method in ('GET', 'HEAD', 'OPTIONS'):
+        return None
+    origin = request.headers.get('Origin')
+    if origin is not None and _host_only(origin) not in _LOCAL_HOSTS:
+        return 'Cross-site request refused', 403
+    if request.headers.get('Sec-Fetch-Site') == 'cross-site':
+        return 'Cross-site request refused', 403
+    return None
+
+
 @app.context_processor
 def _nav_counts():
     # Nav badge. Counted here (one indexed COUNT) instead of the old main.js, which
@@ -1501,13 +1534,22 @@ def api_export():
     # (Loop variable is `tx`, not `t` — `t` is the translation function above.)
     init_jpy = float(get_setting('initial_jpy_balance', '0') or 0)
     init_krw = float(get_setting('initial_krw_balance', '0') or 0)
+
+    def text(v):
+        # Shop/item/note text comes from mails and receipts. openpyxl stores a string
+        # starting with '=' as a formula, so a crafted item name would run as one
+        # (e.g. =HYPERLINK / DDE) when the file is opened: force it to plain text.
+        s = '' if v is None else str(v)
+        return "'" + s if s[:1] in ('=', '+', '-', '@') else s
+
     for i, tx in enumerate(txs, start=2):
         ws.append([
-            tx['date'], tx['type'], tx['major'], tx['minor'], tx['category'],
-            tx['shop'], tx['item'], tx['jpy_amount'], tx['krw_amount'],
+            tx['date'], text(tx['type']), text(tx['major']), text(tx['minor']),
+            text(tx['category']), text(tx['shop']), text(tx['item']),
+            tx['jpy_amount'], tx['krw_amount'],
             f"=J{i-1}+H{i}" if i > 2 else init_jpy + (tx['jpy_amount'] or 0),
             f"=K{i-1}+I{i}" if i > 2 else init_krw + (tx['krw_amount'] or 0),
-            tx['note'], tx['exchange_rate']
+            text(tx['note']), tx['exchange_rate']
         ])
         ws.cell(i, 1).number_format = 'YYYY/MM/DD'
 

@@ -131,6 +131,8 @@ Receipts/mails older than `MIN_YEAR` (2025) are never entered, so a year that is
 - `auto_rules` currently applies to PayPay import only (not receipt/mail).
 - Settings save: `POST /api/settings` writes the received keys directly into the `settings` table (arbitrary keys allowed).
 - Staging session ids come from the URL/JSON and are joined into paths, so always go through `app._session_file()` / `_valid_session()` (uuid-only); a raw `os.path.join(TEMP_DIR, session_id)` let `/temp/%2E%2E/kakeibo.db` download the ledger.
+- `app._local_only()` (before_request) refuses a non-loopback `Host` (DNS rebinding) and any non-GET request whose `Origin` is not localhost or whose `Sec-Fetch-Site` is `cross-site` (multipart/text-plain posts skip CORS preflight, so other sites could otherwise replace credentials.json, import CSVs or start a sync). Serving on a LAN address would need `_LOCAL_HOSTS` extended.
+- Excel export writes shop/item/note through `text()`, which prefixes `'` to values starting with `= + - @` (mail/receipt text must never become a formula).
 - Every aggregate/export query must filter `deleted_at IS NULL` (trash rows are soft-deleted) — stats and Excel export once counted trashed rows.
 - Uploaded filenames are sanitized with `secure_filename()` before hitting disk (the original name is still kept for display and the duplicate check); `/uploads/...` and `/temp/...` are served with `send_from_directory`, which refuses paths resolving outside their root.
 - First-run onboarding: if `setup_done` is unset, show the balance-input modal; if Gmail is not connected, show a reminder banner (hidden via `gmail_reminder_dismissed`).
