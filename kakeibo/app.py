@@ -312,6 +312,8 @@ def transactions():
         initial_krw=get_setting('initial_krw_balance', '0'),
         gmail=config.gmail_status(),
         gmail_reminder_dismissed=(get_setting('gmail_reminder_dismissed', '') == '1'),
+        mail_job=_running_job('mail'),
+        pending=_pending_sessions(),
     )
 
 
@@ -583,6 +585,66 @@ def api_add_tx():
     return jsonify({'id': new_id, 'ok': True})
 
 
+SUGGEST_LIMIT = 15
+# Placeholder item names that are not worth suggesting
+_SUGGEST_SKIP = ('(세부내역 없음)',)
+
+
+@app.route('/api/suggest')
+def api_suggest():
+    """Autocomplete for the shop / item inputs: past values containing `q`, most used first.
+
+    field=item: items of `shop` (if given) come first, then the rest. Each item also
+    carries its latest category and amount so the page can fill empty fields.
+    """
+    field = request.args.get('field')
+    if field not in ('shop', 'item'):
+        return jsonify({'error': 'field must be shop or item'}), 400
+    q = (request.args.get('q') or '').strip()
+    shop = (request.args.get('shop') or '').strip()
+    like = '%' + q.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%'
+
+    def ranked(extra_sql='', extra=()):
+        # `field` is whitelisted above, so the column name is safe to format in
+        return conn.execute(f"""
+            SELECT {field} AS v FROM transactions
+            WHERE deleted_at IS NULL AND {field} != '' AND {field} IS NOT NULL
+              AND {field} LIKE ? ESCAPE '\\' {extra_sql}
+            GROUP BY {field} ORDER BY COUNT(*) DESC, MAX(date) DESC LIMIT ?
+        """, (like, *extra, SUGGEST_LIMIT)).fetchall()
+
+    conn = get_db()
+    values = []
+    if field == 'item' and shop:
+        values = [r['v'] for r in ranked('AND shop = ?', (shop,))]
+    for r in ranked():
+        if r['v'] not in values and len(values) < SUGGEST_LIMIT:
+            values.append(r['v'])
+    values = [v for v in values if v not in _SUGGEST_SKIP]
+
+    out = []
+    for v in values:
+        entry = {'value': v}
+        if field == 'item':
+            # Latest use of this item (at this shop if possible): category + amount
+            row = None
+            if shop:
+                row = conn.execute(
+                    "SELECT type, major, minor, category, jpy_amount FROM transactions "
+                    "WHERE deleted_at IS NULL AND item=? AND shop=? ORDER BY date DESC, id DESC LIMIT 1",
+                    (v, shop)).fetchone()
+            row = row or conn.execute(
+                "SELECT type, major, minor, category, jpy_amount FROM transactions "
+                "WHERE deleted_at IS NULL AND item=? ORDER BY date DESC, id DESC LIMIT 1",
+                (v,)).fetchone()
+            if row:
+                entry.update(type=row['type'], major=row['major'] or '', minor=row['minor'] or '',
+                             sub=row['category'] or '', amount=row['jpy_amount'])
+        out.append(entry)
+    conn.close()
+    return jsonify(out)
+
+
 @app.route('/api/transactions/<int:tx_id>', methods=['PUT'])
 def api_update_tx(tx_id):
     d = request.json
@@ -686,8 +748,14 @@ def receipt_stage(session_id):
         return redirect(url_for('transactions'))
     with open(sf, encoding='utf-8') as f:
         data = json.load(f)
+    session_dir = os.path.join(TEMP_DIR, session_id)
+    # An analyzed photo's original is deleted, so it can no longer be selected
+    analyzed = [s['saved'] for s in data.get('staged', [])
+                if not os.path.exists(os.path.join(session_dir, s['saved']))]
     return render_template('receipt_stage.html',
-        session_id=session_id, staged=data.get('staged', []))
+        session_id=session_id, staged=data.get('staged', []),
+        analyzed=analyzed, results_count=len(data.get('results', [])),
+        running_job=_running_job('receipt', session_id))
 
 
 @app.route('/api/receipts/analyze', methods=['POST'])
@@ -736,6 +804,7 @@ def api_analyze_status(job_id):
     if not job or job.get('kind') != 'receipt':
         return jsonify({'error': t('msg.sync_job_gone')}), 404
     out = {k: job.get(k) for k in ('status', 'index', 'total', 'current', 'message', 'photos')}
+    out['elapsed'] = int(time.time() - job.get('started_at', time.time()))
     if job['status'] == 'done':
         out.update(job.get('result') or {})
         if (job.get('result') or {}).get('count'):
@@ -1012,6 +1081,82 @@ _mail_jobs = {}                  # job_id -> {status, stage, message, index, tot
                                  # (receipt-analyze jobs live here too, with kind='receipt')
 _mail_jobs_lock = threading.Lock()
 _MAIL_JOB_TTL = 900              # forget a finished job after 15 min
+
+
+def _running_job(kind, session_id=None):
+    """id of a running job of this kind (optionally for one staging session), else None."""
+    with _mail_jobs_lock:
+        for jid, job in _mail_jobs.items():
+            if (job.get('kind', 'mail') == kind and job.get('status') == 'running'
+                    and (session_id is None or job.get('session_id') == session_id)):
+                return jid
+    return None
+
+
+def _pending_sessions() -> list:
+    """Staged results nobody has confirmed yet, newest first.
+
+    The review/stage URLs used to live only in the page that started the job, so
+    closing it lost them - and unreviewed mails are not in mail_seen, so the next
+    sync paid to analyze them again. Read from disk, so it survives a restart.
+    """
+    out = []
+    try:
+        names = os.listdir(TEMP_DIR)
+    except OSError:
+        return out
+    for name in names:
+        sid = name[:-5]
+        if not name.endswith('.json') or not _valid_session(sid):
+            continue
+        path = os.path.join(TEMP_DIR, name)
+        try:
+            with open(path, encoding='utf-8') as f:
+                data = json.load(f)
+            at = os.path.getmtime(path)
+        except (OSError, ValueError):
+            continue
+        item = {'sid': sid, 'at': time.strftime('%m-%d %H:%M', time.localtime(at)), 'ts': at}
+        if 'emails' in data:
+            item.update(kind='mail', n=len(data['emails']),  # not 'items': Jinja reads p.items as dict.items()
+                        n_items=sum(len(e.get('items', [])) for e in data['emails']),
+                        url=url_for('email_review', session_id=sid))
+        elif data.get('results'):
+            item.update(kind='receipt', n=len(data['results']),
+                        url=url_for('receipt_review', session_id=sid))
+        elif data.get('staged'):
+            item.update(kind='staged', n=len(data['staged']),
+                        running=bool(_running_job('receipt', sid)),
+                        url=url_for('receipt_stage', session_id=sid))
+        else:
+            continue
+        out.append(item)
+    return sorted(out, key=lambda x: -x['ts'])
+
+
+@app.route('/api/sessions/<session_id>/discard', methods=['POST'])
+def api_discard_session(session_id):
+    """Throw away staged results. Discarded mails are recorded as handled, so the
+    next sync does not spend AI calls on them again."""
+    sf = _session_file(session_id)
+    if not sf:
+        return jsonify({'error': 'Bad session'}), 400
+    if _running_job('receipt', session_id):
+        return jsonify({'error': t('pending.busy')}), 409
+    if os.path.exists(sf):
+        try:
+            with open(sf, encoding='utf-8') as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            data = {}
+        if data.get('emails'):
+            conn = get_db()
+            generic_sync.mark_seen(conn, [e.get('gmail_id') for e in data['emails']], 'reviewed')
+            conn.close()
+        os.remove(sf)
+    # The photo folder is named after the (validated) id, never taken from the file
+    shutil.rmtree(os.path.join(TEMP_DIR, session_id), ignore_errors=True)
+    return jsonify({'ok': True})
 
 
 def _drop_old_jobs(now):

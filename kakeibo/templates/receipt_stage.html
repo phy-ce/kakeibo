@@ -1,9 +1,14 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
   <div>
     <h5 class="mb-0">{{ t('receipt.review_photos') }}</h5>
     <div class="text-secondary small">{{ t('receipt.only_checked_analyzed') }} <span class="text-warning">{{ t('receipt.duplicate') }}</span>{{ t('receipt.dup_auto_unchecked') }}</div>
+    {% if analyzed %}
+    <div class="small text-info mt-1"><i class="bi bi-check2-circle"></i> {{ t('receipt.already_analyzed_n', n=analyzed|length) }}
+      {% if results_count %}<a href="{{ url_for('receipt_review', session_id=session_id) }}" class="ms-1">{{ t('receipt.go_review') }}</a>{% endif %}
+    </div>
+    {% endif %}
   </div>
   <div class="d-flex gap-2">
     <button class="btn btn-secondary btn-sm" onclick="location.href='/transactions'">{{ t('common.cancel') }}</button>
@@ -33,8 +38,9 @@
 
 <div class="row g-3">
 {% for s in staged %}
+  {% set done = s.saved in analyzed %}
   <div class="col-6 col-md-3 col-lg-2">
-    <div class="card bg-dark border-secondary h-100">
+    <div class="card bg-dark border-secondary h-100{% if done %} opacity-50{% endif %}">
       <div class="position-relative">
         <img src="/temp/{{ session_id }}/{{ s.saved|urlencode }}"
              onclick="showReceipt('/temp/{{ session_id }}/{{ s.saved|urlencode }}')"
@@ -44,13 +50,14 @@
         {% if s.dup %}
         <span class="badge bg-warning text-dark position-absolute top-0 end-0 m-1">{{ t('receipt.duplicate') }}</span>
         {% endif %}
-        <span class="photo-state" id="st-{{ loop.index0 }}" style="display:none"></span>
+        <span class="photo-state{% if done %} badge text-bg-info{% endif %}" id="st-{{ loop.index0 }}"
+              {% if not done %}style="display:none"{% endif %}>{% if done %}{{ t('receipt.st_done') }}{% endif %}</span>
       </div>
       <div class="card-body p-2">
         <div class="form-check">
           <input class="form-check-input stage-check" type="checkbox"
                  value="{{ s.saved }}" id="chk-{{ loop.index0 }}"
-                 {% if not s.dup %}checked{% endif %}>
+                 {% if done %}disabled{% elif not s.dup %}checked{% endif %}>
           <label class="form-check-label small text-truncate d-block" for="chk-{{ loop.index0 }}"
                  title="{{ s.name }}" style="max-width:100%">{{ s.name }}</label>
         </div>
@@ -66,9 +73,11 @@
 {% block scripts %}
 <script>
 const sessionId = "{{ session_id }}";
+// Set when this page is (re)opened while an analyze run for this batch is going
+const RUNNING_JOB = {{ running_job|tojson }};
 
 function toggleAll(v) {
-  document.querySelectorAll('.stage-check').forEach(c => c.checked = v);
+  document.querySelectorAll('.stage-check:not(:disabled)').forEach(c => c.checked = v);
 }
 
 // 'saved' token -> card index, so a status badge can be put on the right photo
@@ -99,12 +108,34 @@ function paintPhotos(photos) {
 }
 
 function setBusy(on) {
-  document.querySelectorAll('.stage-check, button').forEach(b => b.disabled = on);
+  document.querySelectorAll('.stage-check, button').forEach(b => {
+    if (on) { b.dataset.wasDisabled = b.disabled ? '1' : ''; b.disabled = true; }
+    else    { b.disabled = b.dataset.wasDisabled === '1'; }
+  });
+}
+
+// Elapsed time counts from the job's real start, also after the page was re-opened
+let anStart = Date.now();
+let anTimer = null;
+function tick() {
+  document.getElementById('an-elapsed').textContent =
+    {{ t('receipt.prog_elapsed')|tojson }}.replace('{s}', Math.round((Date.now() - anStart) / 1000));
+}
+
+function beginUi() {
+  setBusy(true);
+  document.getElementById('an-panel').style.display = '';
+  document.getElementById('an-review').style.display = 'none';
+  document.getElementById('an-spinner').style.display = '';
+  anStart = Date.now();
+  tick();
+  clearInterval(anTimer);
+  anTimer = setInterval(tick, 1000);
 }
 
 function stopUi(msg, reviewUrl, failed) {
   document.getElementById('an-spinner').style.display = 'none';
-  clearInterval(analyze.timer);
+  clearInterval(anTimer);
   const bar = document.getElementById('an-bar');
   bar.style.width = '100%';
   if (failed) bar.classList.replace('bg-warning', 'bg-danger');
@@ -120,14 +151,7 @@ function stopUi(msg, reviewUrl, failed) {
 async function analyze() {
   const selected = [...document.querySelectorAll('.stage-check:checked')].map(c => c.value);
   if (!selected.length) { alert({{ t('receipt.select_one')|tojson }}); return; }
-  setBusy(true);
-  document.getElementById('an-panel').style.display = '';
-  document.getElementById('an-review').style.display = 'none';
-  const t0 = Date.now();
-  const tick = () => document.getElementById('an-elapsed').textContent =
-    {{ t('receipt.prog_elapsed')|tojson }}.replace('{s}', Math.round((Date.now() - t0) / 1000));
-  tick();
-  analyze.timer = setInterval(tick, 1000);
+  beginUi();
   paintPhotos(Object.fromEntries(selected.map(s => [s, {state: 'wait'}])));
 
   let start;
@@ -140,18 +164,25 @@ async function analyze() {
     stopUi({{ t('receipt.prog_failed')|tojson }}, null, true); return;
   }
   if (!start.job_id) { stopUi(start.error || {{ t('receipt.prog_failed')|tojson }}, null, true); return; }
+  follow(start.job_id);
+}
 
-  let misses = 0;
+// Poll a job until it ends (it keeps running server-side even if this page is closed)
+async function follow(jobId) {
+  let misses = 0, first = true;
   while (true) {
     await new Promise(r => setTimeout(r, 700));
     let d;
     try {
-      d = await fetch('/api/receipts/analyze/status/' + start.job_id).then(r => r.json());
+      const r = await fetch('/api/receipts/analyze/status/' + jobId);
+      if (r.status === 404) { location.reload(); return; }   // job long gone: show the saved state
+      d = await r.json();
       misses = 0;
     } catch (e) {
       if (++misses > 20) { stopUi({{ t('receipt.prog_failed')|tojson }}, null, true); return; }
       continue;      // transient hiccup: keep polling
     }
+    if (first && d.elapsed != null) { anStart = Date.now() - d.elapsed * 1000; tick(); first = false; }
     paintPhotos(d.photos);
     const done = Object.values(d.photos || {}).filter(p => !['wait', 'run'].includes(p.state)).length;
     document.getElementById('an-bar').style.width = Math.max(3, Math.round(done / (d.total || 1) * 100)) + '%';
@@ -171,5 +202,9 @@ async function analyze() {
     }
   }
 }
+
+document.addEventListener('DOMContentLoaded', () => {
+  if (RUNNING_JOB) { beginUi(); follow(RUNNING_JOB); }
+});
 </script>
 {% endblock %}

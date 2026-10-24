@@ -30,6 +30,33 @@
 </div>
 {% endif %}
 
+{# Work that outlived the page that started it: a running sync, results nobody reviewed #}
+{% if mail_job %}
+<div class="alert alert-warning d-flex align-items-center justify-content-between py-2 mb-2 pending-row">
+  <div class="small"><span class="spinner-border spinner-border-sm me-2"></span>{{ t('pending.sync_running') }}</div>
+  <button class="btn btn-sm btn-warning" onclick="showMailProgress('{{ mail_job }}')">{{ t('pending.show_progress') }}</button>
+</div>
+{% endif %}
+{% for p in pending %}
+<div class="alert alert-info d-flex align-items-center justify-content-between py-2 mb-2 pending-row" id="pending-{{ p.sid }}">
+  <div class="small">
+    {% if p.kind == 'mail' %}<i class="bi bi-envelope-check me-2"></i>{{ t('pending.mail', n=p.n, items=p.n_items) }}
+    {% elif p.kind == 'receipt' %}<i class="bi bi-receipt me-2"></i>{{ t('pending.receipt', n=p.n) }}
+    {% elif p.running %}<span class="spinner-border spinner-border-sm me-2"></span>{{ t('pending.analyzing', n=p.n) }}
+    {% else %}<i class="bi bi-images me-2"></i>{{ t('pending.staged', n=p.n) }}{% endif %}
+    <span class="text-secondary ms-1">{{ p.at }}</span>
+  </div>
+  <div class="d-flex gap-2 flex-shrink-0">
+    <a class="btn btn-sm btn-info" href="{{ p.url }}">
+      {{ t('pending.show_progress') if p.running else (t('pending.continue') if p.kind == 'staged' else t('pending.review')) }}
+    </a>
+    {% if not p.running %}
+    <button class="btn btn-sm btn-outline-light" onclick="discardSession('{{ p.sid }}', '{{ p.kind }}')">{{ t('pending.discard') }}</button>
+    {% endif %}
+  </div>
+</div>
+{% endfor %}
+
 <!-- Headline numbers: what is left, what went out this month, what still needs sorting -->
 <div class="row g-2 mb-3 summary-row">
   <div class="col-6 col-lg-3">
@@ -628,6 +655,28 @@ function _fillEditModal(t) {
   new bootstrap.Modal(document.getElementById('tx-modal')).show();
 }
 
+// Shop / item autocomplete in the add/edit dialog. Picking a known item fills the
+// category (and the amount of the last time) only where the dialog is still empty.
+document.addEventListener('DOMContentLoaded', () => {
+  attachSuggest(document.getElementById('tx-shop'), 'shop');
+  attachSuggest(document.getElementById('tx-item'), 'item', {
+    shopOf: () => document.getElementById('tx-shop').value,
+    onPick: s => {
+      if (s.major && !document.getElementById('tx-major').value) {
+        document.getElementById('tx-type').value = s.type || '지출';
+        loadCategoryOptions();
+        document.getElementById('tx-major').value = s.major;
+        loadMinorOptions();
+        document.getElementById('tx-minor').value = s.minor;
+        loadSubOptions();
+        document.getElementById('tx-category').value = s.sub;
+      }
+      const jpy = document.getElementById('tx-jpy');
+      if (!jpy.value && s.amount != null) jpy.value = s.amount;
+    },
+  });
+});
+
 function saveTx() {
   const id = document.getElementById('tx-id').value;
   const body = {
@@ -734,13 +783,30 @@ async function startMailSync() {
     return;
   }
   if (!start.job_id) { syncFail(start.error || {{ t('tx.mail_sync_error')|tojson }}); return; }
+  followMailJob(start.job_id);
+}
 
+// Re-open the progress window of a sync that is still running (its page was closed)
+function showMailProgress(jobId) {
+  syncModal = bootstrap.Modal.getOrCreateInstance(document.getElementById('sync-modal'));
+  document.getElementById('sync-ask').style.display = 'none';
+  document.getElementById('sync-run').style.display = '';
+  document.getElementById('sync-spinner').style.display = '';
+  syncModal.show();
+  followMailJob(jobId);
+}
+
+async function followMailJob(jobId) {
+  if (followMailJob.active === jobId) return;     // already polling this one
+  followMailJob.active = jobId;
   // Poll until the job finishes (it keeps running server-side even if this page is closed)
   while (true) {
     await new Promise(r => setTimeout(r, 800));
     let d;
     try {
-      d = await fetch('/api/email/sync/status/' + start.job_id).then(r => r.json());
+      const r = await fetch('/api/email/sync/status/' + jobId);
+      if (r.status === 404) { location.reload(); return; }   // finished long ago: banners show the result
+      d = await r.json();
     } catch (e) { continue; }   // transient hiccup — keep polling
     syncRender(d);
     if (d.status === 'error') { syncFail(d.error || {{ t('tx.mail_sync_error')|tojson }}); return; }
@@ -757,6 +823,15 @@ async function startMailSync() {
       return;
     }
   }
+}
+
+function discardSession(sid, kind) {
+  const q = kind === 'mail' ? {{ t('pending.discard_mail_confirm')|tojson }} : {{ t('pending.discard_confirm')|tojson }};
+  if (!confirm(q)) return;
+  fetch(`/api/sessions/${sid}/discard`, {method: 'POST'}).then(r => r.json()).then(d => {
+    if (d.error) { showToast(d.error); return; }
+    document.getElementById('pending-' + sid)?.remove();
+  });
 }
 
 function syncFail(msg) {

@@ -94,3 +94,6 @@ document.addEventListener('change', e => {
     el.classList.toggle('is-unset', !el.value);
   }
 });
+
+// Shop / item autocomplete on every review row (suggest.js, loaded by base.html)
+if (typeof attachReviewSuggest === 'function') attachReviewSuggest();
