@@ -115,6 +115,80 @@ def _squeeze(text: str) -> str:
     return re.sub(r"\s*\n\s*", "\n", text).strip()
 
 
+# Lines that carry a price (or a total/tax/shipping label next to one). The excerpt is
+# built around these, the way a paper receipt is just the priced lines of a purchase.
+_PRICE_LINE_RE = re.compile(
+    r"[¥￥₩$]\s?\d|\d[\d,]*\s?(円|원|yen|JPY|KRW)\b|合計|小計|税込|消費税|送料|割引|請求|お支払|total",
+    re.IGNORECASE)
+EXCERPT_BEFORE = 3       # lines kept above a price line (item names sit above their price)
+EXCERPT_AFTER = 1        # and below it (quantity / tax notes)
+EXCERPT_MAX_LINES = 60
+EXCERPT_LINE_CHARS = 120
+
+
+def price_excerpt(body: str) -> str:
+    """Receipt-like excerpt of a mail: only the lines around prices.
+
+    Each price line keeps EXCERPT_BEFORE lines above and EXCERPT_AFTER below it;
+    overlapping windows merge and gaps are marked with '...'. Shown when a mail
+    import is opened from the ledger, like the photo of a receipt.
+    """
+    lines = [ln.strip() for ln in (body or "").split("\n") if ln.strip()]
+    keep = set()
+    for i, ln in enumerate(lines):
+        if _PRICE_LINE_RE.search(ln):
+            keep.update(range(max(0, i - EXCERPT_BEFORE), min(len(lines), i + EXCERPT_AFTER + 1)))
+    if not keep:
+        return "\n".join(lines[:15])
+    out, prev = [], None
+    for i in sorted(keep):
+        if prev is not None and i != prev + 1:
+            out.append("...")
+        ln = lines[i]
+        out.append(ln if len(ln) <= EXCERPT_LINE_CHARS else ln[:EXCERPT_LINE_CHARS] + "...")
+        prev = i
+        if len(out) >= EXCERPT_MAX_LINES:
+            out.append("...")
+            break
+    return "\n".join(out)
+
+
+def save_excerpts(conn, emails: list, gmail_ids) -> None:
+    """Store the excerpt of each staged mail whose items were actually added."""
+    want = {str(g) for g in gmail_ids if g}
+    rows = [(e["gmail_id"], e.get("sender", ""), e.get("subject", ""), e.get("date", ""),
+             e.get("excerpt") or price_excerpt(e.get("body", "")))
+            for e in emails if e.get("gmail_id") in want]
+    if rows:
+        conn.executemany(
+            "INSERT OR REPLACE INTO mail_excerpt (gmail_id, sender, subject, date, text) "
+            "VALUES (?,?,?,?,?)", rows)
+        conn.commit()
+
+
+def get_excerpt(conn, gmail_id: str):
+    """Excerpt for one imported mail. Mails imported before excerpts existed are
+    fetched from Gmail once and cached. Returns None when it cannot be had."""
+    row = conn.execute("SELECT sender, subject, date, text FROM mail_excerpt WHERE gmail_id=?",
+                       (gmail_id,)).fetchone()
+    if row:
+        return dict(row)
+    try:
+        full = get_gmail_service().users().messages().get(
+            userId="me", id=gmail_id, format="full").execute()
+    except Exception:
+        return None
+    payload = full.get("payload", {})
+    dt = datetime.datetime.fromtimestamp(int(full.get("internalDate", 0)) / 1000)
+    em = {"gmail_id": gmail_id, "sender": _header(payload, "From"),
+          "subject": _header(payload, "Subject"),
+          "date": f"{dt.year}-{dt.month:02d}-{dt.day:02d}",
+          "excerpt": price_excerpt(extract_text(payload))}
+    save_excerpts(conn, [em], [gmail_id])
+    return {"sender": em["sender"], "subject": em["subject"], "date": em["date"],
+            "text": em["excerpt"]}
+
+
 def _header(payload, name: str) -> str:
     for h in payload.get("headers", []):
         if h.get("name", "").lower() == name.lower():
@@ -390,6 +464,8 @@ def collect_generic(conn, days: int = None, query: str = None, max_results: int 
             # the way a receipt photo can be opened on its review page.
             "body": body[:BODY_PREVIEW_CHARS],
             "body_truncated": len(body) > BODY_PREVIEW_CHARS,
+            # Built from the full body (the preview above is cut); saved on confirm.
+            "excerpt": price_excerpt(body),
         })
         existing.add(mid)
 

@@ -102,6 +102,7 @@
         </div>
       </div>
     </div>
+
   </div>
 
   <!-- Category management -->
@@ -109,7 +110,7 @@
     <div class="card bg-dark border-secondary">
       <div class="card-header border-secondary d-flex justify-content-between align-items-center">
         <span>{{ t('settings.manage_categories') }}</span>
-        <button class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#cat-modal">
+        <button class="btn btn-sm btn-success" onclick="openCatModal()">
           <i class="bi bi-plus"></i> {{ t('common.add') }}
         </button>
       </div>
@@ -125,8 +126,12 @@
               <td class="small">{{ cat_label(c.major) }}</td>
               <td class="small text-secondary">{{ cat_label(c.minor) }}</td>
               <td class="small text-secondary">{{ cat_label(c.sub) }}</td>
-              <td>
-                <button class="btn btn-link btn-sm p-0 text-danger" onclick="deleteCat({{ c.id }})">
+              <td class="text-nowrap">
+                <button class="btn btn-link btn-sm p-0 text-secondary" title="{{ t('settings.add_sibling') }}"
+                        onclick="openCatModal({{ {'type': c.type, 'major': c.major, 'minor': c.minor}|tojson|forceescape }})">
+                  <i class="bi bi-plus-square"></i>
+                </button>
+                <button class="btn btn-link btn-sm p-0 text-danger ms-1" onclick="deleteCat({{ c.id }})">
                   <i class="bi bi-trash"></i>
                 </button>
               </td>
@@ -139,6 +144,7 @@
   </div>
 </div>
 
+
 <!-- Category add modal -->
 <div class="modal fade" id="cat-modal" tabindex="-1">
   <div class="modal-dialog">
@@ -148,23 +154,35 @@
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
+        {# Major/minor: pick an existing one from the list or type a new one #}
         <div class="mb-2">
           <label class="form-label small">{{ t('common.type') }}</label>
-          <select id="c-type" class="form-select form-select-sm bg-dark text-white border-secondary">
+          <select id="c-type" class="form-select form-select-sm bg-dark text-white border-secondary" onchange="catFormChanged()">
             <option value="지출">{{ cat_label('지출') }}</option><option value="수입">{{ cat_label('수입') }}</option>
           </select>
         </div>
         <div class="mb-2">
           <label class="form-label small">{{ t('settings.major') }}</label>
-          <input type="text" id="c-major" class="form-control form-control-sm bg-dark text-white border-secondary">
+          <input type="text" id="c-major" list="c-major-list" autocomplete="off" placeholder="{{ t('settings.pick_or_type') }}"
+                 class="form-control form-control-sm bg-dark text-white border-secondary" oninput="catFormChanged()">
+          <datalist id="c-major-list"></datalist>
         </div>
         <div class="mb-2">
           <label class="form-label small">{{ t('settings.minor') }}</label>
-          <input type="text" id="c-minor" class="form-control form-control-sm bg-dark text-white border-secondary">
+          <input type="text" id="c-minor" list="c-minor-list" autocomplete="off" placeholder="{{ t('settings.pick_or_type') }}"
+                 class="form-control form-control-sm bg-dark text-white border-secondary" oninput="catFormChanged()">
+          <datalist id="c-minor-list"></datalist>
         </div>
         <div class="mb-2">
           <label class="form-label small">{{ t('common.category') }}</label>
-          <input type="text" id="c-sub" class="form-control form-control-sm bg-dark text-white border-secondary">
+          <input type="text" id="c-sub" autocomplete="off"
+                 class="form-control form-control-sm bg-dark text-white border-secondary" oninput="catFormChanged()"
+                 onkeydown="if (event.key === 'Enter') addCat()">
+        </div>
+        <!-- What already exists at the chosen level, so nothing is added twice -->
+        <div id="c-existing" class="small text-secondary"></div>
+        <div id="c-dup" class="small text-warning mt-1" style="display:none">
+          <i class="bi bi-exclamation-triangle"></i> {{ t('settings.cat_exists') }}
         </div>
       </div>
       <div class="modal-footer border-secondary">
@@ -221,16 +239,63 @@ function uploadGmailCreds() {
     .catch(() => alert({{ t('settings.upload_failed')|tojson }}));
 }
 
-function addCat() {
-  const body = {
-    type:  document.getElementById('c-type').value,
-    major: document.getElementById('c-major').value,
-    minor: document.getElementById('c-minor').value,
-    sub:   document.getElementById('c-sub').value,
-  };
-  fetch('/api/categories', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)})
-    .then(() => location.reload());
+const ALL_CATS = {{ categories|tojson }};
+const uniq = arr => [...new Set(arr.filter(v => v))];
+const catEsc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const cv = id => document.getElementById(id).value.trim();
+
+function fillList(id, values) {
+  document.getElementById(id).innerHTML = values.map(v =>
+    `<option value="${catEsc(v)}">${catLabel(v) !== v ? catEsc(catLabel(v)) : ''}</option>`).join('');
 }
+
+// Rebuild the suggestions for the chosen type/major and show what already exists there
+function catFormChanged() {
+  const type = cv('c-type'), major = cv('c-major'), minor = cv('c-minor'), sub = cv('c-sub');
+  const ofType = ALL_CATS.filter(c => c.type === type);
+  const ofMajor = ofType.filter(c => c.major === major);
+  fillList('c-major-list', uniq(ofType.map(c => c.major)));
+  fillList('c-minor-list', uniq(ofMajor.map(c => c.minor)));
+
+  let label, items;
+  if (!major || !ofMajor.length) {
+    label = {{ t('settings.existing_majors')|tojson }}; items = uniq(ofType.map(c => c.major));
+  } else if (!minor || !ofMajor.some(c => c.minor === minor)) {
+    label = {{ t('settings.existing_minors')|tojson }}.replace('{name}', catLabel(major)); items = uniq(ofMajor.map(c => c.minor));
+  } else {
+    label = {{ t('settings.existing_subs')|tojson }}.replace('{name}', catLabel(minor));
+    items = uniq(ofMajor.filter(c => c.minor === minor).map(c => c.sub));
+  }
+  document.getElementById('c-existing').innerHTML = items.length
+    ? `${catEsc(label)}: ` + items.map(v => `<span class="badge bg-secondary fw-normal me-1">${catEsc(catLabel(v))}</span>`).join('')
+    : '';
+  const dup = !!major && ALL_CATS.some(c => c.type === type && c.major === major
+    && (c.minor || '') === minor && (c.sub || '') === sub);
+  document.getElementById('c-dup').style.display = dup ? '' : 'none';
+}
+
+// preset: {type, major, minor} from a table row ("add next to this one")
+function openCatModal(preset) {
+  const p = preset || {};
+  document.getElementById('c-type').value  = p.type || '지출';
+  document.getElementById('c-major').value = p.major || '';
+  document.getElementById('c-minor').value = p.minor || '';
+  document.getElementById('c-sub').value   = '';
+  catFormChanged();
+  const el = document.getElementById('cat-modal');
+  el.addEventListener('shown.bs.modal', () =>
+    document.getElementById(p.minor ? 'c-sub' : (p.major ? 'c-minor' : 'c-major')).focus(), {once: true});
+  bootstrap.Modal.getOrCreateInstance(el).show();
+}
+
+function addCat() {
+  const body = {type: cv('c-type'), major: cv('c-major'), minor: cv('c-minor'), sub: cv('c-sub')};
+  if (!body.major) { alert({{ t('settings.major_required')|tojson }}); return; }
+  fetch('/api/categories', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)})
+    .then(r => r.json())
+    .then(d => { if (d.ok) location.reload(); else alert(d.error); });
+}
+
 
 function deleteCat(id) {
   if (!confirm({{ t('settings.confirm_delete')|tojson }})) return;

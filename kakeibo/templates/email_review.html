@@ -93,6 +93,11 @@ function showMail(btn) {
       <div class="small text-white text-truncate">{{ email.subject }}</div>
       <div class="text-secondary text-truncate" style="font-size:0.75rem">{{ email.sender }} · {{ email.date }}</div>
     </div>
+    {% if email['items'] %}
+    <input type="text" class="form-control form-control-sm flex-shrink-0 review-shop-all d-none d-md-block" style="width:180px"
+           value="{{ email['items'][0].shop or '' }}" placeholder="{{ t('review.shop_all') }}"
+           title="{{ t('review.shop_all_tip') }}" oninput="reviewShopAll(this)">
+    {% endif %}
     <span class="text-secondary small flex-shrink-0">{{ email['items']|length }}{{ t('receipt.items_count_suffix') }}</span>
     {% if email.body %}
     <button type="button" class="btn btn-outline-secondary btn-sm flex-shrink-0"
@@ -107,7 +112,7 @@ function showMail(btn) {
   </div>
   <div class="card-body p-2">
     {% for item in email['items'] %}
-    <div class="review-item{% if item.dup %} review-dup{% endif %}" data-gmail-id="{{ email.gmail_id }}" data-note="{{ item.note or '' }}"
+    <div class="review-item{% if item.dup %} review-dup{% endif %}" data-gmail-id="{{ email.gmail_id }}"
          data-major="{{ item.major or '' }}" data-minor="{{ item.minor or '' }}" data-sub="{{ item.sub or '' }}">
       <!-- line 1: what was bought -->
       <div class="row g-2 align-items-center">
@@ -128,8 +133,7 @@ function showMail(btn) {
           <input type="text" class="form-control form-control-sm field-shop" value="{{ item.shop or '' }}" placeholder="{{ t('common.shop') }}">
         </div>
         <div class="col-12 col-md-3">
-          <input type="text" class="form-control form-control-sm text-white field-item" value="{{ item.item or '' }}" placeholder="{{ t('receipt.item_name') }}"
-                 {% if item.note %}title="{{ item.note }}"{% endif %}>
+          <input type="text" class="form-control form-control-sm text-white field-item" value="{{ item.item or '' }}" placeholder="{{ t('receipt.item_name') }}">
         </div>
         <div class="col-12 col-md-2">
           <input type="number" class="form-control form-control-sm text-end field-amount" value="{{ item.amount or '' }}" placeholder="{{ t('common.amount') }}">
@@ -156,6 +160,11 @@ function showMail(btn) {
         </div>
         <div class="col">
           <select class="form-select form-select-sm field-sub" data-placeholder="{{ t('review.sub') }}"></select>
+        </div>
+        <div class="col-12 col-md-3">
+          {# Pre-filled with the full product title the AI put in note #}
+          <input type="text" class="form-control form-control-sm field-note" value="{{ item.note or '' }}" placeholder="{{ t('review.note') }}"
+                 {% if item.note %}title="{{ item.note }}"{% endif %}>
         </div>
         <div class="col-auto">
           <button class="btn btn-sm btn-outline-danger" title="{{ t('review.remove_row') }}"
@@ -207,7 +216,7 @@ function confirmSelected() {
     if (!el.querySelector('.field-include').checked) return;   // only the checked ones
     items.push({
       gmail_id: el.dataset.gmailId,
-      note:   el.dataset.note || '',
+      note:   el.querySelector('.field-note').value,
       date:   el.querySelector('.field-date').value,
       type:   el.querySelector('.field-type').value,
       major:  el.querySelector('.field-major').value,

@@ -5,6 +5,7 @@ import json
 import time
 import uuid
 import shutil
+import calendar
 import threading
 from datetime import date, timedelta
 from itertools import groupby
@@ -23,6 +24,7 @@ from .exchange import fetch_rate
 from .ocr import gemini as gemini_ocr
 from .sync import generic as generic_sync
 from . import auto_rules
+from . import recurring
 from .ai_items import clean_items, Refiner
 
 from PIL import Image
@@ -51,6 +53,8 @@ app.jinja_env.globals['t'] = i18n.t
 app.jinja_env.globals['cat_label'] = i18n.cat_label
 app.jinja_env.globals['current_lang'] = i18n.current_lang
 app.jinja_env.globals['category_map'] = i18n.category_map
+# Mobile PASMO member site: transport rides are read from its history screenshot
+app.jinja_env.globals['PASMO_URL'] = 'https://www.mobile.pasmo.jp/'
 
 
 # ── local-only guard ──────────────────────────────────────────────────────────
@@ -149,6 +153,8 @@ def _tx_matches(tx, f) -> bool:
         return False
     if f.get('major') and tx['major'] != f['major']:
         return False
+    if f.get('minor') and tx['minor'] != f['minor']:
+        return False
     if f.get('source') and tx['source'] != f['source']:
         return False
     if f.get('uncategorized') and tx['major']:
@@ -227,14 +233,82 @@ def _receipt_units(rows):
                 groups[key] = u
                 units.append(u)
             u['rows'].append(tx)
+            u['last'] = tx   # ledger-last row: its balance is the group's, whatever the sort
             u['total'] += tx['jpy_amount'] or 0
             if not u['thumb'] and tx.get('receipt_img'):
                 u['thumb'] = tx['receipt_img']
         else:
             units.append({'type': 'single', 'tx': tx})
 
+    # A "receipt" spanning several dates is a history screenshot (PASMO rides etc.),
+    # not one purchase: collapsing it hid a month of rides behind one header row.
+    out = []
+    for u in units:
+        if u['type'] == 'group' and len({tx['date'] for tx in u['rows']}) > 1:
+            out.extend({'type': 'single', 'tx': tx} for tx in u['rows'])
+        else:
+            out.append(u)
     # Single-item receipts are also kept as groups (receipt header style) — unified, just without the arrow.
+    return out
+
+
+# Sortable list columns (header click). Months always stay newest first; the sort
+# orders the units inside each month and the items inside each receipt group.
+SORT_KEYS = ('date', 'type', 'minor', 'shop', 'jpy')
+
+
+def _tx_sort_key(tx, key):
+    if key == 'type':
+        return tx['type'] or ''
+    if key == 'minor':
+        # Match what the column shows: the localized minor, blank when uncategorized
+        return i18n.cat_label(tx['minor']) if tx.get('major') and tx.get('minor') else ''
+    if key == 'shop':
+        return f"{tx.get('shop') or ''} {tx.get('item') or ''}".lower()
+    if key == 'jpy':
+        return tx['jpy_amount'] or 0
+    return tx['date'] or ''
+
+
+def _unit_sort_key(u, key):
+    if u['type'] == 'single':
+        return _tx_sort_key(u['tx'], key)
+    # A receipt group sorts by what its header row shows
+    if key == 'type':
+        return '지출' if u['total'] < 0 else '수입'
+    if key == 'minor':
+        return t('tx.receipt')
+    if key == 'shop':
+        return u['shop'].lower()
+    if key == 'jpy':
+        return u['total']
+    return u['date'] or ''
+
+
+def _sort_units(units, key, desc):
+    """Stable sort, so ties keep the ledger order (date, then entry order)."""
+    if key == 'minor':
+        # A receipt has no single minor: unfold it so each item lands under its own
+        units = [x for u in units for x in (
+            [{'type': 'single', 'tx': tx} for tx in u['rows']] if u['type'] == 'group' else [u])]
+    for u in units:
+        if u['type'] == 'group':
+            u['rows'].sort(key=lambda tx: _tx_sort_key(tx, key), reverse=desc)
+    units.sort(key=lambda u: _unit_sort_key(u, key), reverse=desc)
     return units
+
+
+def _list_sort(args):
+    """Sort from the URL (and remember it), else the last one used."""
+    key, direction = args.get('sort'), args.get('dir')
+    if key in SORT_KEYS and direction in ('asc', 'desc'):
+        if get_setting('tx_sort', '') != f'{key}:{direction}':
+            set_setting('tx_sort', f'{key}:{direction}')
+        return key, direction
+    saved_key, _, saved_dir = get_setting('tx_sort', '').partition(':')
+    if saved_key in SORT_KEYS and saved_dir in ('asc', 'desc'):
+        return saved_key, saved_dir
+    return 'date', 'asc'
 
 
 # ── pages ─────────────────────────────────────────────────────────────────────
@@ -268,7 +342,9 @@ def _transport_reminder():
 
 @app.route('/transactions')
 def transactions():
-    f = {k: v for k, v in request.args.items() if v}
+    recurring.post_due()   # an app left running past the 10th still gets the allowance
+    sort_key, sort_dir = _list_sort(request.args)
+    f = {k: v for k, v in request.args.items() if v and k not in ('sort', 'dir')}
     txs = get_transactions_list(f or None)
 
     grouped = {}
@@ -277,7 +353,7 @@ def transactions():
         expense = sum(tx['jpy_amount'] or 0 for tx in items if tx['type'] == '지출')
         income = sum(tx['jpy_amount'] or 0 for tx in items if tx['type'] == '수입')
         grouped[k] = {
-            'units': _receipt_units(items),
+            'units': _sort_units(_receipt_units(items), sort_key, sort_dir == 'desc'),
             'expense': expense, 'income': income, 'net': income + expense,
             'count': len(items),
         }
@@ -305,6 +381,7 @@ def transactions():
         year_months=[r['ym'] for r in ym_rows],
         majors=[r['major'] for r in majors],
         filters=f,
+        sort_key=sort_key, sort_dir=sort_dir,
         transport_reminder=_transport_reminder(),
         summary=_ledger_summary(),
         first_run=(get_setting('setup_done', '') != '1'),
@@ -479,11 +556,39 @@ def budget():
     m = request.args.get('month', date.today().month, type=int)
 
     conn = get_db()
-    budgets = [dict(b) for b in conn.execute(
-        "SELECT * FROM budget WHERE year=? AND month=? ORDER BY name", (y, m)
-    ).fetchall()]
     cats = [dict(r) for r in conn.execute(
         "SELECT DISTINCT major, minor, sub FROM categories WHERE type='지출' ORDER BY major, minor, sub"
+    ).fetchall()]
+    budget_data, totals = _budget_report(conn, y, m)
+    rec_cats = [dict(r) for r in conn.execute(
+        "SELECT type, major, minor, sub FROM categories ORDER BY type, major, minor, sub").fetchall()]
+    conn.close()
+
+    return render_template('budget.html', year=y, month=m,
+        budget_data=budget_data, totals=totals, categories=cats,
+        recurring_rules=recurring.describe(), rec_categories=rec_cats)
+
+
+def _budget_match(b, tx):
+    ms  = (b.get('match_shop')  or '').strip().lower()
+    mi  = (b.get('match_item')  or '').strip().lower()
+    mmj = (b.get('match_major') or '').strip()
+    mmn = (b.get('match_minor') or '').strip()
+    msb = (b.get('match_sub')   or '').strip()
+    if not (ms or mi or mmj or mmn or msb):
+        return False
+    if ms  and ms  not in (tx.get('shop')  or '').lower(): return False
+    if mi  and mi  not in (tx.get('item')  or '').lower(): return False
+    if mmj and mmj != (tx.get('major')    or ''):          return False
+    if mmn and mmn != (tx.get('minor')    or ''):          return False
+    if msb and msb != (tx.get('category') or ''):          return False
+    return True
+
+
+def _budget_report(conn, y, m):
+    """Budget lines of a month with what was actually spent on each (budget page + stats)."""
+    budgets = [dict(b) for b in conn.execute(
+        "SELECT * FROM budget WHERE year=? AND month=? ORDER BY name", (y, m)
     ).fetchall()]
     # All expense transactions for the given month
     txs = [dict(r) for r in conn.execute("""
@@ -491,28 +596,12 @@ def budget():
         WHERE type='지출' AND deleted_at IS NULL
               AND date BETWEEN ? AND ?
     """, (f"{y}-{m:02d}-01", f"{y}-{m:02d}-31")).fetchall()]
-    conn.close()
-
-    def _match(b, t):
-        ms  = (b.get('match_shop')  or '').strip().lower()
-        mi  = (b.get('match_item')  or '').strip().lower()
-        mmj = (b.get('match_major') or '').strip()
-        mmn = (b.get('match_minor') or '').strip()
-        msb = (b.get('match_sub')   or '').strip()
-        if not (ms or mi or mmj or mmn or msb):
-            return False
-        if ms  and ms  not in (t.get('shop')  or '').lower(): return False
-        if mi  and mi  not in (t.get('item')  or '').lower(): return False
-        if mmj and mmj != (t.get('major')    or ''):          return False
-        if mmn and mmn != (t.get('minor')    or ''):          return False
-        if msb and msb != (t.get('category') or ''):          return False
-        return True
 
     budget_data = []
     total_budget = 0.0
     total_actual = 0.0
     for b in budgets:
-        actual = sum((t['jpy_amount'] or 0) for t in txs if _match(b, t))
+        actual = sum((tx['jpy_amount'] or 0) for tx in txs if _budget_match(b, tx))
         budget_data.append({**b,
             'actual': actual,
             'exceeded': abs(actual) > b['amount'] if b['amount'] else False,
@@ -526,9 +615,7 @@ def budget():
         'remain':   total_budget - total_actual,
         'exceeded': total_actual > total_budget and total_budget > 0,
     }
-
-    return render_template('budget.html', year=y, month=m,
-        budget_data=budget_data, totals=totals, categories=cats)
+    return budget_data, totals
 
 
 @app.route('/settings')
@@ -985,7 +1072,8 @@ def api_confirm():
         """, (dt, item.get('type','지출'),
               item.get('major',''), item.get('minor',''), item.get('sub',''),
               item.get('shop',''), item.get('item',''),
-              jpy, None, '', rate, 'receipt', receipt_img, receipt_name, receipt_id))
+              jpy, None, (item.get('note') or '').strip(), rate, 'receipt',
+              receipt_img, receipt_name, receipt_id))
     conn.commit()
     conn.close()
 
@@ -1385,6 +1473,9 @@ def api_email_confirm():
                 staged = json.load(f)
             generic_sync.mark_seen(
                 conn, [e.get('gmail_id') for e in staged.get('emails', [])], 'reviewed')
+            if n:
+                generic_sync.save_excerpts(conn, staged.get('emails', []),
+                                           [it.get('gmail_id') for it in items])
         except (OSError, ValueError):
             pass
     conn.close()
@@ -1394,6 +1485,21 @@ def api_email_confirm():
         except OSError:
             pass
     return jsonify({'saved': n, 'message': t('msg.added_n', n=n)})
+
+
+@app.route('/api/mail-excerpt/<gmail_id>')
+def api_mail_excerpt(gmail_id):
+    """Receipt-like price excerpt of an imported mail (opened from the ledger)."""
+    if not re.fullmatch(r'[0-9A-Za-z_-]{1,64}', gmail_id):
+        return jsonify({'error': t('tx.mail_excerpt_none')}), 404
+    conn = get_db()
+    try:
+        ex = generic_sync.get_excerpt(conn, gmail_id)
+    finally:
+        conn.close()
+    if not ex:
+        return jsonify({'error': t('tx.mail_excerpt_none')}), 404
+    return jsonify(ex)
 
 
 # ── api: Gmail credentials upload ─────────────────────────────────────────────
@@ -1478,36 +1584,144 @@ def api_set_rate(date_str):
 
 # ── api: stats ────────────────────────────────────────────────────────────────
 
+def _shift_month(y, m, delta):
+    i = y * 12 + (m - 1) + delta
+    return i // 12, i % 12 + 1
+
+
 @app.route('/api/stats')
 def api_stats():
-    y = request.args.get('year',  date.today().year,  type=int)
-    m = request.args.get('month', date.today().month, type=int)
+    """Everything the stats page shows for one month, plus the 12-month trend up to it.
+
+    Rows count as expense or income by their CATEGORY (major's type in the categories
+    table), falling back to the row type: a return refunded as `수입` under
+    `변동지출/의류비` lowers clothing spend instead of inflating income, and a
+    scholarship typed `지출` under `고정수입` counts as income. Spend is positive.
+    """
+    today = date.today()
+    y = request.args.get('year', today.year, type=int)
+    m = request.args.get('month', today.month, type=int)
+    if not 1 <= m <= 12:
+        y, m = today.year, today.month
+    ym = f"{y}-{m:02d}"
+    months = ["%04d-%02d" % _shift_month(y, m, d) for d in range(-11, 1)]
+    prev_ym = months[-2]
+
     conn = get_db()
-
-    monthly = conn.execute("""
-        SELECT substr(date,1,7) as ym,
-               SUM(CASE WHEN type='지출' THEN jpy_amount ELSE 0 END) as expense,
-               SUM(CASE WHEN type='수입' THEN jpy_amount ELSE 0 END) as income
-        FROM transactions WHERE date LIKE ? AND deleted_at IS NULL
-        GROUP BY ym ORDER BY ym
-    """, (f"{y}-%",)).fetchall()
-
-    cat_expense = conn.execute("""
-        SELECT minor, SUM(jpy_amount) as total
-        FROM transactions
-        WHERE type='지출' AND deleted_at IS NULL AND date BETWEEN ? AND ?
-        GROUP BY minor ORDER BY total ASC
-    """, (f"{y}-{m:02d}-01", f"{y}-{m:02d}-31")).fetchall()
-
-    budgets = conn.execute(
-        "SELECT name, amount FROM budget WHERE year=? AND month=?", (y, m)
-    ).fetchall()
+    kinds = {r['major']: r['type'] for r in conn.execute(
+        "SELECT DISTINCT major, type FROM categories").fetchall()}
+    rows = [dict(r) for r in conn.execute("""
+        SELECT id, date, type, major, minor, shop, item, jpy_amount FROM transactions
+        WHERE deleted_at IS NULL AND date >= ? AND date <= ?
+        ORDER BY date, id
+    """, (months[0] + '-01', ym + '-31')).fetchall()]
+    all_months = [r['ym'] for r in conn.execute(
+        "SELECT DISTINCT substr(date,1,7) AS ym FROM transactions "
+        "WHERE deleted_at IS NULL ORDER BY ym DESC").fetchall()]
+    budget_data, budget_totals = _budget_report(conn, y, m)
     conn.close()
 
+    by_month = {k: {'ym': k, 'expense': 0.0, 'income': 0.0, 'count': 0} for k in months}
+    for r in rows:
+        amt = r['jpy_amount'] or 0
+        r['kind'] = kinds.get(r['major']) or r['type']
+        r['spend'] = -amt if r['kind'] == '지출' else 0.0
+        b = by_month.get(r['date'][:7])
+        if b is None:
+            continue
+        b['count'] += 1
+        if r['kind'] == '지출':
+            b['expense'] += r['spend']
+        else:
+            b['income'] += amt
+    for b in by_month.values():
+        b['net'] = b['income'] - b['expense']
+
+    cur = [r for r in rows if r['date'][:7] == ym]
+    cur_exp = [r for r in cur if r['kind'] == '지출']
+    prev_exp = [r for r in rows if r['date'][:7] == prev_ym and r['kind'] == '지출']
+    this = by_month[ym]
+
+    days_in = calendar.monthrange(y, m)[1]
+    is_current = (y, m) == (today.year, today.month)
+    if is_current:
+        elapsed = today.day
+    elif (y, m) > (today.year, today.month):
+        elapsed = 0
+    else:
+        elapsed = days_in
+    prior = [by_month[k]['expense'] for k in months[-4:-1] if by_month[k]['count']]
+    daily_avg = this['expense'] / elapsed if elapsed else 0.0
+    kpi = {
+        'expense': this['expense'], 'income': this['income'], 'net': this['net'],
+        'count': this['count'],
+        'prev_expense': by_month[prev_ym]['expense'] if by_month[prev_ym]['count'] else None,
+        'avg3': (sum(prior) / len(prior)) if prior else None,
+        'daily_avg': daily_avg, 'elapsed': elapsed, 'days': days_in,
+        'projected': daily_avg * days_in if is_current else None,
+        'savings_rate': (this['net'] / this['income']) if this['income'] > 0 else None,
+        'uncategorized': sum(1 for r in cur if not r['major']),
+        'refunds': -sum(r['spend'] for r in cur_exp if r['spend'] < 0),
+    }
+
+    # Spend per (major, minor), with last month's figure for the same pair
+    def per_cat(rs):
+        out = {}
+        for r in rs:
+            key = (r['major'] or '', r['minor'] or '')
+            c = out.setdefault(key, {'amount': 0.0, 'count': 0})
+            c['amount'] += r['spend']
+            c['count'] += 1
+        return out
+    now_c, prev_c = per_cat(cur_exp), per_cat(prev_exp)
+    categories = sorted((
+        {'major': mj, 'minor': mn,
+         'major_label': i18n.cat_label(mj) if mj else t('tx.sum_uncat'),
+         'label': i18n.cat_label(mn) if mn else t('stats.no_minor'),
+         'amount': c['amount'], 'count': c['count'],
+         'prev': prev_c.get((mj, mn), {}).get('amount')}
+        for (mj, mn), c in now_c.items()
+    ), key=lambda c: -c['amount'])
+    majors = {}
+    for c in categories:
+        majors[c['major_label']] = majors.get(c['major_label'], 0.0) + c['amount']
+
+    # Cumulative spend by day of month, this month vs last month (pace)
+    def daily(rs, n):
+        d = [0.0] * n
+        for r in rs:
+            try:
+                d[int(r['date'][8:10]) - 1] += r['spend']
+            except (ValueError, IndexError):
+                pass
+        return d
+    py, pm = _shift_month(y, m, -1)
+    day_now = daily(cur_exp, days_in)
+    day_prev = daily(prev_exp, calendar.monthrange(py, pm)[1])
+
+    shops = {}
+    for r in cur_exp:
+        name = (r['shop'] or '').strip() or t('tx.no_shop')
+        s = shops.setdefault(name, {'shop': name, 'amount': 0.0, 'count': 0})
+        s['amount'] += r['spend']
+        s['count'] += 1
+    top_shops = sorted(shops.values(), key=lambda s: -s['amount'])[:10]
+    biggest = [{'id': r['id'], 'date': r['date'], 'shop': r['shop'] or '', 'item': r['item'] or '',
+                'minor': i18n.cat_label(r['minor']) if r['minor'] else '', 'amount': r['spend']}
+               for r in sorted(cur_exp, key=lambda r: -r['spend'])[:10] if r['spend'] > 0]
+
     return jsonify({
-        'monthly':     [dict(r) for r in monthly],
-        'cat_expense': [dict(r) for r in cat_expense],
-        'budgets':     [dict(r) for r in budgets],
+        'ym': ym, 'months': all_months, 'is_current': is_current,
+        'trend': [by_month[k] for k in months],
+        'kpi': kpi,
+        'categories': categories,
+        'majors': [{'label': k, 'amount': v} for k, v in sorted(majors.items(), key=lambda kv: -kv[1])],
+        'daily': {'now': day_now, 'prev': day_prev, 'elapsed': elapsed, 'prev_ym': prev_ym},
+        'shops': top_shops,
+        'biggest': biggest,
+        'budgets': [{'name': b['name'], 'amount': b['amount'] or 0, 'actual': abs(b['actual']),
+                     'exceeded': b['exceeded']} for b in budget_data],
+        'budget_totals': budget_totals,
     })
 
 
@@ -1618,11 +1832,17 @@ def api_get_cats():
 
 @app.route('/api/categories', methods=['POST'])
 def api_add_cat():
-    d = request.json
+    d = request.json or {}
+    row = tuple(str(d.get(k) or '').strip() for k in ('type', 'major', 'minor', 'sub'))
+    if row[0] not in ('지출', '수입') or not row[1]:
+        return jsonify({'ok': False, 'error': t('settings.major_required')}), 400
     conn = get_db()
+    if conn.execute("SELECT 1 FROM categories WHERE type=? AND major=? AND COALESCE(minor,'')=? "
+                    "AND COALESCE(sub,'')=?", row).fetchone():
+        conn.close()
+        return jsonify({'ok': False, 'error': t('settings.cat_exists')}), 409
     cur = conn.execute(
-        "INSERT INTO categories(type,major,minor,sub) VALUES(?,?,?,?)",
-        (d['type'], d['major'], d.get('minor',''), d.get('sub',''))
+        "INSERT INTO categories(type,major,minor,sub) VALUES(?,?,?,?)", row
     )
     conn.commit()
     new_id = cur.lastrowid
@@ -1637,6 +1857,21 @@ def api_del_cat(cid):
     conn.commit()
     conn.close()
     return jsonify({'ok': True})
+
+
+# ── api: monthly recurring rules (~/.kakeibo/recurring.json) ──────────────────
+
+@app.route('/api/recurring', methods=['POST'])
+def api_recurring_save():
+    rule, err = recurring.upsert(request.json or {})
+    if err:
+        return jsonify({'ok': False, 'error': t('recurring.err_' + err)}), 400
+    return jsonify({'ok': True, 'rule': rule})
+
+
+@app.route('/api/recurring/<rid>', methods=['DELETE'])
+def api_recurring_delete(rid):
+    return jsonify({'ok': recurring.delete(rid)})
 
 
 # ── api: settings ─────────────────────────────────────────────────────────────

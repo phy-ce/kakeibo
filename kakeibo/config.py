@@ -38,7 +38,7 @@ def user_path(filename: str) -> str:
 # If an older version created some in the project root, move them to this folder once.
 _DATA_FILES = [
     "kakeibo.db", "kakeibo.db-wal", "kakeibo.db-shm",
-    "categories.json", "auto_rules.json",
+    "categories.json", "auto_rules.json", "recurring.json",
 ]
 
 

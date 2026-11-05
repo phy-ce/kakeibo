@@ -1,6 +1,13 @@
 {% extends "base.html" %}
 {% block content %}
 
+<ul class="nav nav-tabs border-secondary mb-3">
+  <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-budget" onclick="history.replaceState(null,'',location.pathname+location.search)">{{ t('budget.tab_budget') }}</button></li>
+  <li class="nav-item"><button class="nav-link" id="tab-recurring-btn" data-bs-toggle="tab" data-bs-target="#tab-recurring" onclick="history.replaceState(null,'','#recurring')">{{ t('budget.tab_recurring') }}</button></li>
+</ul>
+<div class="tab-content">
+<div class="tab-pane fade show active" id="tab-budget">
+
 <div class="d-flex gap-2 align-items-center mb-3">
   <select id="bud-year" class="form-select form-select-sm w-auto bg-dark text-white border-secondary" onchange="goMonth()">
     {% for y in range(2024, 2028) %}
@@ -77,6 +84,12 @@
   </tfoot>
   {% endif %}
 </table>
+</div>
+
+<div class="tab-pane fade" id="tab-recurring">
+  {% include '_recurring.html' %}
+</div>
+</div>
 
 <!-- Add modal -->
 <div class="modal fade" id="add-budget-modal" tabindex="-1">
@@ -169,6 +182,9 @@ function loadMatchSub() {
   document.getElementById('b-match-sub').innerHTML =
     '<option value=""></option>' + subs.map(s => `<option>${s}</option>`).join('');
 }
+
+// Open the recurring tab directly via /budget#recurring (kept across reloads after saving)
+if (location.hash === '#recurring') bootstrap.Tab.getOrCreateInstance(document.getElementById('tab-recurring-btn')).show();
 
 function goMonth() {
   const y = document.getElementById('bud-year').value;

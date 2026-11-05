@@ -22,9 +22,13 @@
     <strong>{{ t('tx.no_transport_this_week') }}</strong>
     <span class="ms-2 small text-secondary">({{ transport_reminder.monday }} ~ {{ transport_reminder.sunday }})</span>
   </div>
-  <div>
-    <button class="btn btn-sm btn-warning" onclick="openTransportAdd()">
-      <i class="bi bi-plus-lg"></i> {{ t('tx.add_now') }}
+  {# Transport comes in as a PASMO history screenshot: open the site, then upload it as a receipt #}
+  <div class="d-flex gap-2 flex-shrink-0">
+    <a class="btn btn-sm btn-warning" href="{{ PASMO_URL }}" target="_blank" rel="noopener">
+      <i class="bi bi-box-arrow-up-right"></i> {{ t('tx.open_pasmo') }}
+    </a>
+    <button class="btn btn-sm btn-outline-warning" onclick="document.getElementById('receipt-input').click()">
+      <i class="bi bi-receipt"></i> {{ t('tx.upload_history') }}
     </button>
   </div>
 </div>
@@ -127,6 +131,7 @@
     <option value="mcdonald" {% if filters.get('source')=='mcdonald' %}selected{% endif %}>マクド</option>
     <option value="email"    {% if filters.get('source')=='email'    %}selected{% endif %}>{{ t('tx.mail_ai') }}</option>
     <option value="manual"   {% if filters.get('source')=='manual'   %}selected{% endif %}>{{ t('tx.manual') }}</option>
+    <option value="recurring" {% if filters.get('source')=='recurring' %}selected{% endif %}>{{ t('tx.recurring') }}</option>
   </select>
   {% if filters %}
   <a class="btn btn-sm btn-link text-secondary px-1" href="{{ url_for('transactions') }}"><i class="bi bi-x-circle"></i> {{ t('tx.clear_filters') }}</a>
@@ -153,6 +158,7 @@
       </button>
       <ul class="dropdown-menu dropdown-menu-end">
         <li><button class="dropdown-item" onclick="document.getElementById('paypay-input').click()"><i class="bi bi-credit-card me-2"></i>{{ t('tx.paypay_csv') }}</button></li>
+        <li><a class="dropdown-item" href="{{ PASMO_URL }}" target="_blank" rel="noopener"><i class="bi bi-train-front me-2"></i>{{ t('tx.pasmo_site') }}</a></li>
         <li><button class="dropdown-item" onclick="fetchRates()"><i class="bi bi-currency-exchange me-2"></i>{{ t('tx.exchange_rate') }}</button></li>
         <li><a class="dropdown-item" href="/api/export/excel"><i class="bi bi-file-excel me-2"></i>{{ t('tx.export') }}</a></li>
       </ul>
@@ -188,6 +194,7 @@
     {% if tx.source == 'receipt' and not item %}<span class="badge bg-secondary ms-1 small">rcpt</span>{% endif %}
     {% if tx.source == 'mcdonald' %}<span class="badge bg-danger ms-1 small">mcd</span>{% endif %}
     {% if tx.source == 'email' %}<span class="badge bg-info text-dark ms-1 small">AI</span>{% endif %}
+    {% if tx.source == 'recurring' %}<span class="badge bg-secondary ms-1 small" title="{{ t('tx.recurring') }}"><i class="bi bi-arrow-repeat"></i></span>{% endif %}
   </td>
   <td>
     {% if not item %}<div class="small fw-semibold">{{ tx.shop or '' }}</div>{% endif %}
@@ -195,6 +202,8 @@
       {{ tx.item or '' }}
       {% if tx.receipt_img %}
         <a href="#" onclick="showReceipt('/{{ tx.receipt_img }}'); return false" class="ms-1 text-info" title="{{ t('tx.view_receipt_large') }}"><i class="bi bi-image"></i></a>
+      {% elif tx.source == 'email' and tx.gmail_id %}
+        <a href="#" onclick="showMailExcerpt({{ tx.gmail_id|tojson|forceescape }}); return false" class="ms-1 text-info" title="{{ t('tx.view_mail_excerpt') }}"><i class="bi bi-envelope-paper"></i></a>
       {% endif %}
     </div>
   </td>
@@ -208,6 +217,17 @@
     <button class="btn btn-link btn-sm p-0 text-danger ms-1" onclick="deleteTx({{ tx.id }})"><i class="bi bi-trash"></i></button>
   </td>
 </tr>
+{% endmacro %}
+
+{# Sortable header: click sorts by the column, clicking the active one reverses it. Filters are kept. #}
+{% macro sort_th(key, label, cls='') %}
+{% set active = (sort_key == key) %}
+{% set next_dir = ('asc' if sort_dir == 'desc' else 'desc') if active else 'asc' %}
+<th class="{{ cls }} text-nowrap">
+  <a href="{{ url_for('transactions', sort=key, dir=next_dir, **filters) }}" title="{{ t('tx.sort_tip') }}"
+     class="text-decoration-none {{ 'text-white' if active else 'text-secondary' }}">{{ label }}{% if active %}
+    <i class="bi bi-caret-{{ 'up' if sort_dir == 'asc' else 'down' }}-fill small"></i>{% endif %}</a>
+</th>
 {% endmacro %}
 
 <!-- Monthly group -->
@@ -230,11 +250,11 @@
         <thead class="text-secondary">
           <tr>
             <th style="width:28px"><input type="checkbox" class="form-check-input" onchange="toggleMonthCheck('{{ ym }}', this)"></th>
-            <th>{{ t('common.date') }}</th>
-            <th class="d-none d-sm-table-cell">{{ t('common.type') }}</th>
-            <th class="d-none d-sm-table-cell">{{ t('tx.minor') }}</th>
-            <th>{{ t('tx.shop_item') }}</th>
-            <th class="text-end">{{ t('tx.jpy') }}</th>
+            {{ sort_th('date', t('common.date')) }}
+            {{ sort_th('type', t('common.type'), 'd-none d-sm-table-cell') }}
+            {{ sort_th('minor', t('tx.minor'), 'd-none d-sm-table-cell') }}
+            {{ sort_th('shop', t('tx.shop_item')) }}
+            {{ sort_th('jpy', t('tx.jpy'), 'text-end') }}
             <th class="text-end d-none d-md-table-cell">{{ t('tx.balance_jpy') }}</th>
             <th class="text-end d-none d-md-table-cell">{{ t('tx.balance_krw') }}</th>
             <th style="width:60px"></th>
@@ -282,8 +302,8 @@
               <td class="text-end text-nowrap fw-semibold {% if u.total < 0 %}text-danger{% else %}text-success{% endif %}">
                 {{ "¥{:,.0f}".format(u.total) }}
               </td>
-              <td class="text-end small text-secondary d-none d-md-table-cell">{{ "¥{:,.0f}".format(u.rows[-1].jpy_balance or 0) }}</td>
-              <td class="text-end small text-secondary d-none d-md-table-cell">{{ "₩{:,.0f}".format(u.rows[-1].krw_balance or 0) }}</td>
+              <td class="text-end small text-secondary d-none d-md-table-cell">{{ "¥{:,.0f}".format(u.last.jpy_balance or 0) }}</td>
+              <td class="text-end small text-secondary d-none d-md-table-cell">{{ "₩{:,.0f}".format(u.last.krw_balance or 0) }}</td>
               <td class="text-nowrap">
                 {% if single %}
                 <button class="btn btn-link btn-sm p-0 text-secondary" onclick="openEditModal({{ o.id }})"><i class="bi bi-pencil"></i></button>
@@ -466,10 +486,40 @@
   </div>
 </div>
 
+<!-- Mail import shown like a receipt: only the priced lines of the mail -->
+<div id="mail-excerpt" onclick="hideMailExcerpt()"
+     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:2000;
+            align-items:center;justify-content:center;cursor:zoom-out;padding:24px">
+  <div onclick="event.stopPropagation()"
+       style="background:#fbfaf6;color:#222;width:380px;max-width:96%;max-height:92vh;overflow-y:auto;
+              border-radius:4px;box-shadow:0 0 40px #000;padding:18px 20px;cursor:auto;
+              font-family:'MS Gothic','Osaka-Mono',Consolas,monospace;font-size:0.8rem">
+    <div class="text-center fw-bold" id="mx-shop" style="font-size:0.95rem"></div>
+    <div class="text-center" id="mx-subject" style="font-size:0.75rem;color:#555"></div>
+    <div class="text-center" id="mx-date" style="font-size:0.75rem;color:#555"></div>
+    <div style="border-top:1px dashed #999;margin:10px 0"></div>
+    <pre id="mx-text" style="white-space:pre-wrap;word-break:break-word;margin:0;font-family:inherit;color:#222"></pre>
+    <div style="border-top:1px dashed #999;margin:10px 0 0"></div>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
 <script>
+function showMailExcerpt(gid) {
+  fetch('/api/mail-excerpt/' + encodeURIComponent(gid)).then(r => r.json()).then(d => {
+    if (d.error) { alert(d.error); return; }
+    document.getElementById('mx-shop').textContent = (d.sender || '').replace(/\s*<[^>]*>\s*/, '') || d.sender;
+    document.getElementById('mx-subject').textContent = d.subject || '';
+    document.getElementById('mx-date').textContent = d.date || '';
+    document.getElementById('mx-text').textContent = d.text || '';
+    document.getElementById('mail-excerpt').style.display = 'flex';
+  });
+}
+function hideMailExcerpt() { document.getElementById('mail-excerpt').style.display = 'none'; }
+document.addEventListener('keydown', e => { if (e.key === 'Escape') hideMailExcerpt(); });
+
 // ── Onboarding: first-run balance input / Gmail not-configured notice ──
 {% if first_run %}
 document.addEventListener('DOMContentLoaded', () => {
@@ -604,25 +654,6 @@ function openAddModal() {
   document.getElementById('tx-krw').value = '';
   document.getElementById('tx-rate').value = '';
   loadCategoryOptions();
-}
-
-function openTransportAdd() {
-  openAddModal();
-  document.getElementById('tx-type').value = '지출';
-  loadCategoryOptions();
-  // Set values after async option load — auto-select the minor starting with '교통'
-  setTimeout(() => {
-    document.getElementById('tx-major').value = '변동지출';
-    loadMinorOptions();
-    setTimeout(() => {
-      const minorSel = document.getElementById('tx-minor');
-      const transportOpt = [...minorSel.options].find(o => o.value.startsWith('교통'));
-      if (transportOpt) minorSel.value = transportOpt.value;
-      loadSubOptions();
-    }, 50);
-  }, 50);
-  new bootstrap.Modal(document.getElementById('tx-modal')).show();
-  setTimeout(() => document.getElementById('tx-jpy').focus(), 300);
 }
 
 function openEditModal(id) {

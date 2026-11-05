@@ -30,6 +30,10 @@ def main():
     n = purge_orphan_images()
     if n:
         print(f"[cleanup] removed {n} unreferenced receipt image(s)")
+    from . import recurring
+    n = recurring.post_due()
+    if n:
+        print(f"[recurring] posted {n} transaction(s)")
     port = int(os.environ.get("FLASK_PORT", "5000"))
     # Automatically open the browser when the exe is double-clicked
     if os.environ.get("KAKEIBO_NO_BROWSER", "") != "1":

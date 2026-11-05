@@ -8,6 +8,7 @@ token.json
 *.db-wal
 *.db-shm
 auto_rules.json
+recurring.json
 categories.json
 /uploads/
 /temp/

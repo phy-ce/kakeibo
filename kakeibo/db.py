@@ -126,10 +126,26 @@ def init_db():
             key   TEXT PRIMARY KEY,
             value TEXT
         );
+        -- Which month each recurring rule (recurring.json) already posted
+        CREATE TABLE IF NOT EXISTS recurring_log (
+            rule_id   TEXT NOT NULL,
+            ym        TEXT NOT NULL,
+            tx_id     INTEGER,
+            posted_at TEXT DEFAULT '',
+            PRIMARY KEY (rule_id, ym)
+        );
         CREATE TABLE IF NOT EXISTS mail_seen (
             gmail_id TEXT PRIMARY KEY,
             reason   TEXT DEFAULT '',
             seen_at  TEXT DEFAULT ''
+        );
+        -- Price lines of each imported mail, shown like a receipt from the ledger
+        CREATE TABLE IF NOT EXISTS mail_excerpt (
+            gmail_id TEXT PRIMARY KEY,
+            sender   TEXT DEFAULT '',
+            subject  TEXT DEFAULT '',
+            date     TEXT DEFAULT '',
+            text     TEXT DEFAULT ''
         );
         CREATE INDEX IF NOT EXISTS idx_tx_date   ON transactions(date);
         CREATE INDEX IF NOT EXISTS idx_tx_source ON transactions(source);

@@ -29,6 +29,9 @@
         <span class="text-secondary small">{{ result['items']|length }}{{ t('receipt.items_count_suffix') }}</span>
         {# Filled by checkTotals(): printed total vs. the (edited) item amounts #}
         <div class="receipt-total small mt-1"></div>
+        <input type="text" class="form-control form-control-sm mt-1 review-shop-all" style="max-width:260px"
+               value="{{ result['items'][0].shop or '' }}" placeholder="{{ t('review.shop_all') }}"
+               title="{{ t('review.shop_all_tip') }}" oninput="reviewShopAll(this)">
       {% endif %}
     </div>
   </div>
@@ -72,6 +75,9 @@
         <div class="col">
           <select class="form-select form-select-sm field-sub" data-placeholder="{{ t('review.sub') }}"></select>
         </div>
+        <div class="col-12 col-md-3">
+          <input type="text" class="form-control form-control-sm field-note" value="{{ item.note or '' }}" placeholder="{{ t('review.note') }}">
+        </div>
         <div class="col-auto">
           <button class="btn btn-sm btn-outline-danger" title="{{ t('review.remove_row') }}"
                   onclick="this.closest('.review-item').remove()"><i class="bi bi-trash"></i></button>
@@ -103,6 +109,7 @@ function confirmAll() {
       sub:    el.querySelector('.field-sub').value,
       shop:   el.querySelector('.field-shop').value,
       item:   el.querySelector('.field-item').value,
+      note:   el.querySelector('.field-note').value,
       amount: parseFloat(el.querySelector('.field-amount').value) || null,
     });
   });

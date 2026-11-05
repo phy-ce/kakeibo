@@ -73,6 +73,12 @@ function reviewColorAmount(input) {
   input.classList.toggle('amt-income', v > 0);
 }
 
+// Card-level shop box: one receipt / mail is one shop, so set every row at once.
+function reviewShopAll(input) {
+  input.closest('.card').querySelectorAll('.review-item .field-shop')
+    .forEach(f => { f.value = input.value; });
+}
+
 // Build every row's selects from its AI suggestion.
 function reviewInitItems(root) {
   (root || document).querySelectorAll('.review-item').forEach(item => {

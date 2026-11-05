@@ -1,158 +1,332 @@
 {% extends "base.html" %}
 {% block content %}
 
-<div class="d-flex gap-2 align-items-center mb-3">
-  <select id="stat-year" class="form-select form-select-sm w-auto bg-dark text-white border-secondary" onchange="loadStats()">
-    {% for y in range(2024, 2028) %}
-    <option value="{{ y }}" {% if y==year %}selected{% endif %}>{{ y }}{{ t('stats.year_suffix') }}</option>
-    {% endfor %}
-  </select>
-  <select id="stat-month" class="form-select form-select-sm w-auto bg-dark text-white border-secondary" onchange="loadStats()">
-    {% for m in range(1,13) %}
-    <option value="{{ m }}" {% if m==month %}selected{% endif %}>{{ m }}{{ t('stats.month_suffix') }}</option>
-    {% endfor %}
-  </select>
+<!-- Month picker: one month at a time, trend charts lead up to it -->
+<div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+  <h5 class="mb-0 me-2">{{ t('nav.stats') }}</h5>
+  <div class="input-group input-group-sm w-auto">
+    <button class="btn btn-outline-secondary" onclick="shiftMonth(-1)" title="{{ t('stats.prev_month') }}"><i class="bi bi-chevron-left"></i></button>
+    <input type="month" id="stat-ym" class="form-control form-control-sm" style="max-width:150px"
+           value="{{ '%04d-%02d'|format(year, month) }}" onchange="loadStats()">
+    <button class="btn btn-outline-secondary" onclick="shiftMonth(1)" title="{{ t('stats.next_month') }}"><i class="bi bi-chevron-right"></i></button>
+  </div>
+  <button class="btn btn-sm btn-link text-secondary" onclick="goThisMonth()">{{ t('stats.this_month') }}</button>
 </div>
 
-<!-- Annual monthly chart -->
+<div id="stat-empty" class="alert alert-secondary py-2 small" style="display:none">{{ t('stats.empty_month') }}</div>
+
+<!-- Headline numbers -->
 <div class="row g-3 mb-3">
-  <div class="col-lg-8">
+  <div class="col-6 col-lg-3"><div class="card bg-dark border-secondary h-100 stat-tile" id="kpi-expense"></div></div>
+  <div class="col-6 col-lg-3"><div class="card bg-dark border-secondary h-100 stat-tile" id="kpi-income"></div></div>
+  <div class="col-6 col-lg-3"><div class="card bg-dark border-secondary h-100 stat-tile" id="kpi-daily"></div></div>
+  <div class="col-6 col-lg-3"><div class="card bg-dark border-secondary h-100 stat-tile" id="kpi-count"></div></div>
+</div>
+
+<!-- Trend + pace -->
+<div class="row g-3 mb-3">
+  <div class="col-lg-7">
     <div class="card bg-dark border-secondary h-100">
-      <div class="card-header border-secondary small text-secondary">{{ t('stats.monthly_income_expense') }}</div>
-      <div class="card-body"><canvas id="monthly-chart" height="120"></canvas></div>
+      <div class="card-header border-secondary small text-secondary d-flex justify-content-between">
+        <span>{{ t('stats.trend_12') }}</span><span class="d-none d-sm-inline">{{ t('stats.trend_hint') }}</span>
+      </div>
+      <div class="card-body"><div class="stat-chart"><canvas id="trend-chart"></canvas></div></div>
     </div>
   </div>
-  <div class="col-lg-4">
+  <div class="col-lg-5">
     <div class="card bg-dark border-secondary h-100">
-      <div class="card-header border-secondary small text-secondary">{{ t('stats.expense_by_category') }}</div>
-      <div class="card-body"><canvas id="cat-chart"></canvas></div>
+      <div class="card-header border-secondary small text-secondary">{{ t('stats.pace') }}</div>
+      <div class="card-body"><div class="stat-chart"><canvas id="pace-chart"></canvas></div></div>
     </div>
   </div>
 </div>
 
-<!-- Income vs expense -->
-<div class="row g-3">
-  <div class="col-lg-4">
-    <div class="card bg-dark border-secondary">
-      <div class="card-header border-secondary small text-secondary">{{ t('stats.this_month_summary') }}</div>
-      <div class="card-body" id="summary-box">{{ t('common.loading') }}</div>
+<!-- Where it went -->
+<div class="row g-3 mb-3">
+  <div class="col-lg-7">
+    <div class="card bg-dark border-secondary h-100">
+      <div class="card-header border-secondary small text-secondary">
+        <div>{{ t('stats.by_category') }}</div>
+        <div id="major-split" class="mt-1"></div>
+      </div>
+      <div class="card-body p-0">
+        <table class="table table-dark table-hover table-sm mb-0 stat-table">
+          <thead class="text-secondary small">
+            <tr>
+              <th>{{ t('tx.minor') }}</th>
+              <th class="text-end">{{ t('common.amount') }}</th>
+              <th class="d-none d-sm-table-cell" style="width:30%">{{ t('stats.share') }}</th>
+              <th class="text-end d-none d-md-table-cell">{{ t('stats.vs_prev') }}</th>
+              <th class="text-end">{{ t('stats.count') }}</th>
+            </tr>
+          </thead>
+          <tbody id="cat-body"></tbody>
+        </table>
+      </div>
     </div>
   </div>
-  <div class="col-lg-8">
+  <div class="col-lg-5 d-flex flex-column gap-3">
     <div class="card bg-dark border-secondary">
-      <div class="card-header border-secondary small text-secondary">{{ t('stats.budget_vs_actual') }}</div>
-      <div class="card-body p-2" id="budget-vs-actual">{{ t('common.loading') }}</div>
+      <div class="card-header border-secondary small text-secondary">{{ t('stats.top_shops') }}</div>
+      <div class="card-body p-0">
+        <table class="table table-dark table-sm mb-0 stat-table"><tbody id="shop-body"></tbody></table>
+      </div>
+    </div>
+    <div class="card bg-dark border-secondary">
+      <div class="card-header border-secondary small text-secondary">{{ t('stats.biggest') }}</div>
+      <div class="card-body p-0">
+        <table class="table table-dark table-sm mb-0 stat-table"><tbody id="big-body"></tbody></table>
+      </div>
     </div>
   </div>
 </div>
+
+<!-- Budget -->
+<div class="card bg-dark border-secondary mb-3">
+  <div class="card-header border-secondary small text-secondary d-flex justify-content-between">
+    <span>{{ t('stats.budget_vs_actual') }}</span>
+    <a href="#" id="budget-link" class="link-secondary">{{ t('stats.edit_budget') }}</a>
+  </div>
+  <div class="card-body p-2" id="budget-box"></div>
+</div>
+
+<div class="text-secondary small">{{ t('stats.basis_note') }}</div>
 
 {% endblock %}
 
 {% block scripts %}
+<style>
+  .stat-tile { padding: .75rem 1rem; }
+  .stat-tile .k { font-size: .75rem; color: var(--bs-secondary-color); }
+  .stat-tile .v { font-size: 1.5rem; font-weight: 700; line-height: 1.2; margin: .15rem 0; font-variant-numeric: tabular-nums; }
+  .stat-tile .s { font-size: .75rem; color: var(--bs-secondary-color); }
+  .stat-chart { position: relative; height: 260px; }
+  .stat-table td, .stat-table th { padding: .4rem .75rem; vertical-align: middle; }
+  .stat-table td { font-variant-numeric: tabular-nums; }
+  .stat-table tr.link { cursor: pointer; }
+  .share-bar { height: 8px; border-radius: 4px; background: var(--c-expense); min-width: 2px; }
+  :root { --c-expense: #d95926; --c-income: #3987e5; --c-prev: #8a8984; }
+</style>
 <script>
-let monthlyChart, catChart;
+// Labels for JS-built content. Series colors: validated dark categorical slots
+// (blue = income, orange = expense); last month is a muted reference line.
+const L = {{ dict(
+  expense=t('common.expense'), income=t('common.income'), net=t('stats.net'),
+  kpi_expense=t('stats.kpi_expense'), kpi_income=t('stats.kpi_income'),
+  kpi_daily=t('stats.kpi_daily'), kpi_count=t('stats.kpi_count'),
+  vs_prev=t('stats.vs_prev'), avg3=t('stats.avg3'), no_prev=t('stats.no_prev'),
+  savings=t('stats.savings_rate'), projected=t('stats.projected'),
+  days_basis=t('stats.days_basis'), uncat=t('stats.uncat_n'), all_cat=t('stats.all_categorized'),
+  refunds=t('stats.refunds'), this_month=t('stats.series_this'), last_month=t('stats.series_prev'),
+  day=t('stats.day'), new=t('stats.new'), no_data=t('stats.no_data'),
+  no_budget=t('stats.no_budget'), over=t('stats.over'), remain=t('stats.remain'),
+  count_suffix=t('stats.count_suffix'), same=t('stats.same')
+)|tojson }};
+const C = {expense: '#d95926', income: '#3987e5', prev: '#8a8984',
+           tick: '#a8a79f', grid: 'rgba(255,255,255,.07)'};
+
+const yen = n => (n < 0 ? '-¥' : '¥') + Math.abs(Math.round(n)).toLocaleString();
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const pct = (a, b) => b ? Math.round((a - b) / b * 100) : null;
+let trendChart, paceChart, current;
+
+function ymParts() { const [y, m] = document.getElementById('stat-ym').value.split('-'); return [+y, +m]; }
+function setYm(y, m) { document.getElementById('stat-ym').value = `${y}-${String(m).padStart(2, '0')}`; loadStats(); }
+function shiftMonth(d) { const [y, m] = ymParts(); const i = y * 12 + (m - 1) + d; setYm(Math.floor(i / 12), i % 12 + 1); }
+function goThisMonth() { const n = new Date(); setYm(n.getFullYear(), n.getMonth() + 1); }
 
 function loadStats() {
-  const year  = document.getElementById('stat-year').value;
-  const month = document.getElementById('stat-month').value;
-  fetch(`/api/stats?year=${year}&month=${month}`)
-    .then(r => r.json())
-    .then(d => {
-      renderMonthly(d.monthly);
-      renderCat(d.cat_expense);
-      renderSummary(d.monthly, month);
-      renderBudgetVsActual(d.budgets, d.cat_expense);
-    });
+  const [y, m] = ymParts();
+  if (!y || !m) return;
+  history.replaceState(null, '', `/stats?year=${y}&month=${m}`);
+  document.getElementById('budget-link').href = `/budget?year=${y}&month=${m}`;
+  fetch(`/api/stats?year=${y}&month=${m}`).then(r => r.json()).then(d => {
+    current = d;
+    document.getElementById('stat-empty').style.display = d.kpi.count ? 'none' : '';
+    renderKpi(d.kpi);
+    renderTrend(d.trend, d.ym);
+    renderPace(d.daily);
+    renderCats(d.categories, d.majors, d.kpi.expense);
+    renderShops(d.shops);
+    renderBiggest(d.biggest);
+    renderBudget(d.budgets, d.budget_totals);
+  });
 }
 
-function renderMonthly(data) {
-  const labels   = data.map(d => d.ym);
-  const expenses = data.map(d => Math.abs(d.expense || 0));
-  const incomes  = data.map(d => d.income || 0);
-  if (monthlyChart) monthlyChart.destroy();
-  monthlyChart = new Chart(document.getElementById('monthly-chart'), {
+// "▲ 12% vs last month" in text ink; the arrow carries the direction
+function delta(now, ref, label) {
+  if (ref == null) return `<div class="s">${esc(label)}: ${esc(L.no_prev)}</div>`;
+  const p = pct(now, ref);
+  const arrow = p > 0 ? '▲' : (p < 0 ? '▼' : '');
+  const txt = p === null ? yen(now - ref) : (p === 0 ? L.same : `${arrow} ${Math.abs(p)}%`);
+  return `<div class="s">${esc(label)} ${txt} <span class="opacity-75">(${yen(ref)})</span></div>`;
+}
+
+function tile(id, key, value, subs, valueClass) {
+  document.getElementById(id).innerHTML =
+    `<div class="k">${esc(key)}</div><div class="v ${valueClass || ''}">${value}</div>${subs.join('')}`;
+}
+
+function renderKpi(k) {
+  tile('kpi-expense', L.kpi_expense, yen(k.expense), [
+    delta(k.expense, k.prev_expense, L.vs_prev),
+    k.avg3 != null ? `<div class="s">${esc(L.avg3)} ${yen(k.avg3)}</div>` : '',
+    k.refunds > 0 ? `<div class="s">${esc(L.refunds)} ${yen(k.refunds)}</div>` : '',
+  ]);
+  tile('kpi-income', L.kpi_income, yen(k.income), [
+    `<div class="s">${esc(L.net)} <span class="${k.net >= 0 ? 'text-success' : 'text-danger'}">${yen(k.net)}</span></div>`,
+    k.savings_rate != null && k.savings_rate > -1 ? `<div class="s">${esc(L.savings)} ${Math.round(k.savings_rate * 100)}%</div>` : '',
+  ]);
+  tile('kpi-daily', L.kpi_daily, yen(k.daily_avg), [
+    k.projected != null ? `<div class="s">${esc(L.projected)} ${yen(k.projected)}</div>` : '',
+    `<div class="s">${esc(L.days_basis.replace('{n}', k.elapsed).replace('{d}', k.days))}</div>`,
+  ]);
+  tile('kpi-count', L.kpi_count, k.count.toLocaleString() + `<span class="fs-6 fw-normal">${esc(L.count_suffix)}</span>`, [
+    k.uncategorized
+      ? `<div class="s"><a href="/uncategorized" class="link-warning"><i class="bi bi-exclamation-circle"></i> ${esc(L.uncat.replace('{n}', k.uncategorized))}</a></div>`
+      : `<div class="s"><i class="bi bi-check-circle"></i> ${esc(L.all_cat)}</div>`,
+  ]);
+}
+
+const axis = {ticks: {color: C.tick}, grid: {color: C.grid}, border: {display: false}};
+const yenAxis = {...axis, ticks: {color: C.tick, callback: v => yen(v)}};
+
+function renderTrend(trend, ym) {
+  // Drop the empty months before the ledger starts (the selected month always stays)
+  const first = trend.findIndex(r => r.count || r.ym === ym);
+  trend = trend.slice(Math.max(0, first));
+  const labels = trend.map(r => r.ym.slice(2).replace('-', '.'));
+  // The selected month at full strength, the rest receded
+  const fade = (col, r) => r.ym === ym ? col : col + '80';
+  if (trendChart) trendChart.destroy();
+  trendChart = new Chart(document.getElementById('trend-chart'), {
     type: 'bar',
-    data: {
-      labels,
-      datasets: [
-        {label: {{ t('common.expense')|tojson }}, data: expenses, backgroundColor:'rgba(220,53,69,0.7)'},
-        {label: {{ t('common.income')|tojson }}, data: incomes,  backgroundColor:'rgba(25,135,84,0.7)'},
-      ]
-    },
+    data: {labels, datasets: [
+      {label: L.expense, data: trend.map(r => r.expense), backgroundColor: trend.map(r => fade(C.expense, r)),
+       borderRadius: 4, borderSkipped: 'bottom', categoryPercentage: .7, barPercentage: .9},
+      {label: L.income, data: trend.map(r => r.income), backgroundColor: trend.map(r => fade(C.income, r)),
+       borderRadius: 4, borderSkipped: 'bottom', categoryPercentage: .7, barPercentage: .9},
+    ]},
     options: {
-      responsive: true,
-      plugins: {legend:{labels:{color:'#aaa'}}},
-      scales: {
-        x: {ticks:{color:'#aaa'}, grid:{color:'#333'}},
-        y: {ticks:{color:'#aaa'}, grid:{color:'#333'}},
-      }
-    }
+      responsive: true, maintainAspectRatio: false,
+      interaction: {mode: 'index', intersect: false},
+      onClick: (e, els) => { if (els.length) { const [y, m] = trend[els[0].index].ym.split('-'); setYm(+y, +m); } },
+      onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
+      plugins: {
+        legend: {labels: {color: C.tick, boxWidth: 10, boxHeight: 10}},
+        tooltip: {callbacks: {
+          title: items => trend[items[0].dataIndex].ym,
+          label: c => ` ${c.dataset.label}: ${yen(c.raw)}`,
+          footer: items => `${L.net}: ${yen(trend[items[0].dataIndex].net)}`,
+        }},
+      },
+      scales: {x: axis, y: {...yenAxis, beginAtZero: true}},
+    },
   });
 }
 
-function renderCat(data) {
-  const labels = data.map(d => d.minor || {{ t('stats.other')|tojson }});
-  const values = data.map(d => Math.abs(d.total || 0));
-  if (catChart) catChart.destroy();
-  catChart = new Chart(document.getElementById('cat-chart'), {
-    type: 'doughnut',
-    data: {
-      labels,
-      datasets: [{data: values, borderWidth: 1}]
-    },
+function cumulative(arr, upTo) {
+  let s = 0;
+  return arr.map((v, i) => (upTo != null && i >= upTo) ? null : (s += v));
+}
+
+function renderPace(dly) {
+  const n = Math.max(dly.now.length, dly.prev.length);
+  const labels = Array.from({length: n}, (_, i) => i + 1);
+  const now = cumulative(dly.now, dly.elapsed);
+  const prev = cumulative(dly.prev);
+  if (paceChart) paceChart.destroy();
+  paceChart = new Chart(document.getElementById('pace-chart'), {
+    type: 'line',
+    data: {labels, datasets: [
+      {label: L.this_month, data: now, borderColor: C.expense, backgroundColor: C.expense,
+       borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: .2},
+      {label: `${L.last_month} (${dly.prev_ym})`, data: prev, borderColor: C.prev, backgroundColor: C.prev,
+       borderWidth: 2, borderDash: [4, 4], pointRadius: 0, pointHoverRadius: 4, tension: .2},
+    ]},
     options: {
-      responsive: true,
-      plugins: {legend:{labels:{color:'#aaa', font:{size:11}}}}
-    }
+      responsive: true, maintainAspectRatio: false,
+      interaction: {mode: 'index', intersect: false},
+      plugins: {
+        legend: {labels: {color: C.tick, boxWidth: 10, boxHeight: 10}},
+        tooltip: {callbacks: {
+          title: items => `${items[0].label}${L.day}`,
+          label: c => {
+            const day = (c.datasetIndex === 0 ? dly.now : dly.prev)[c.dataIndex] || 0;
+            return ` ${c.dataset.label}: ${yen(c.raw)} (+${yen(day)})`;
+          },
+        }},
+      },
+      scales: {x: {...axis, ticks: {color: C.tick, maxTicksLimit: 8}}, y: {...yenAxis, beginAtZero: true}},
+    },
   });
 }
 
-function renderSummary(monthly, month) {
-  const row = monthly.find(d => d.ym.endsWith(`-${String(month).padStart(2,'0')}`));
-  const expense = row ? Math.abs(row.expense || 0) : 0;
-  const income  = row ? (row.income || 0) : 0;
-  document.getElementById('summary-box').innerHTML = `
-    <div class="d-flex justify-content-between mb-2">
-      <span class="text-secondary">{{ t('common.income') }}</span>
-      <span class="text-success fw-bold">¥${income.toLocaleString()}</span>
-    </div>
-    <div class="d-flex justify-content-between mb-2">
-      <span class="text-secondary">{{ t('common.expense') }}</span>
-      <span class="text-danger fw-bold">¥${expense.toLocaleString()}</span>
-    </div>
-    <hr class="border-secondary">
-    <div class="d-flex justify-content-between">
-      <span class="text-secondary">{{ t('stats.net') }}</span>
-      <span class="fw-bold ${income - expense >= 0 ? 'text-success' : 'text-danger'}">
-        ¥${(income - expense).toLocaleString()}
-      </span>
-    </div>`;
+function renderCats(cats, majors, total) {
+  const split = document.getElementById('major-split');
+  split.innerHTML = majors.length > 1 ? majors.map(m =>
+    `<span class="me-3">${esc(m.label)} <span class="text-white">${yen(m.amount)}</span> <span class="opacity-75">${total ? Math.round(m.amount / total * 100) : 0}%</span></span>`
+  ).join('') : '';
+  const body = document.getElementById('cat-body');
+  if (!cats.length) { body.innerHTML = `<tr><td colspan="5" class="text-secondary small">${esc(L.no_data)}</td></tr>`; return; }
+  const [y, m] = ymParts();
+  const max = Math.max(...cats.map(c => c.amount), 1);
+  body.innerHTML = cats.map(c => {
+    const q = new URLSearchParams({year: y, month: m});
+    if (c.major) q.set('major', c.major); else q.set('uncategorized', '1');
+    if (c.minor) q.set('minor', c.minor);
+    const share = total ? Math.round(c.amount / total * 100) : 0;
+    const diff = c.prev == null ? `<span class="badge bg-secondary">${esc(L.new)}</span>`
+      : (c.amount - c.prev === 0 ? '–' : (c.amount > c.prev ? '+' : '-') + yen(Math.abs(c.amount - c.prev)));
+    return `<tr class="link" onclick="location.href='/transactions?${q}'">
+      <td><div>${esc(c.label)}</div><div class="text-secondary" style="font-size:.7rem">${esc(c.major_label)}</div></td>
+      <td class="text-end">${yen(c.amount)}</td>
+      <td class="d-none d-sm-table-cell"><div class="d-flex align-items-center gap-2">
+        <div class="flex-grow-1"><div class="share-bar" style="width:${Math.max(0, c.amount) / max * 100}%"></div></div>
+        <span class="small text-secondary" style="width:2.5em;text-align:right">${share}%</span></div></td>
+      <td class="text-end small text-secondary d-none d-md-table-cell">${diff}</td>
+      <td class="text-end small text-secondary">${c.count}</td>
+    </tr>`;
+  }).join('');
 }
 
-function renderBudgetVsActual(budgets, actuals) {
-  const actualsMap = {};
-  actuals.forEach(a => { actualsMap[a.minor] = Math.abs(a.total || 0); });
+function renderShops(shops) {
+  const body = document.getElementById('shop-body');
+  body.innerHTML = shops.length ? shops.map((s, i) => `<tr>
+      <td class="text-secondary small" style="width:2em">${i + 1}</td>
+      <td class="text-truncate" style="max-width:200px">${esc(s.shop)}</td>
+      <td class="text-end small text-secondary">${s.count}${esc(L.count_suffix)}</td>
+      <td class="text-end">${yen(s.amount)}</td></tr>`).join('')
+    : `<tr><td class="text-secondary small">${esc(L.no_data)}</td></tr>`;
+}
 
-  if (!budgets.length) {
-    document.getElementById('budget-vs-actual').innerHTML = '<span class="text-secondary small">{{ t('stats.no_budget') }}</span>';
-    return;
-  }
+function renderBiggest(rows) {
+  const body = document.getElementById('big-body');
+  body.innerHTML = rows.length ? rows.map(r => `<tr>
+      <td class="text-secondary small text-nowrap" style="width:4.5em">${esc(r.date.slice(5))}</td>
+      <td class="text-truncate" style="max-width:220px"><div class="small">${esc(r.shop || r.item)}</div>
+        <div class="text-secondary text-truncate" style="font-size:.7rem">${esc(r.shop ? r.item : '')}${r.minor ? ' · ' + esc(r.minor) : ''}</div></td>
+      <td class="text-end">${yen(r.amount)}</td></tr>`).join('')
+    : `<tr><td class="text-secondary small">${esc(L.no_data)}</td></tr>`;
+}
 
-  const rows = budgets.map(b => {
-    const actual  = actualsMap[b.minor] || 0;
-    const over    = actual > b.amount;
-    const pct     = b.amount ? Math.min(100, Math.round(actual / b.amount * 100)) : 0;
+function renderBudget(budgets, totals) {
+  const box = document.getElementById('budget-box');
+  if (!budgets.length) { box.innerHTML = `<span class="text-secondary small">${esc(L.no_budget)}</span>`; return; }
+  const line = (name, actual, amount, over) => {
+    const p = amount ? Math.min(100, Math.round(actual / amount * 100)) : 0;
+    const rest = amount - actual;
     return `<div class="mb-2">
       <div class="d-flex justify-content-between small mb-1">
-        <span>${b.major} / ${b.minor}</span>
-        <span class="${over?'text-danger':'text-secondary'}">¥${actual.toLocaleString()} / ¥${b.amount.toLocaleString()}</span>
+        <span>${over ? '<i class="bi bi-exclamation-triangle-fill text-danger me-1"></i>' : ''}${esc(name)}</span>
+        <span class="text-secondary">${yen(actual)} / ${yen(amount)}
+          · ${over ? `<span class="text-danger">${esc(L.over)} ${yen(-rest)}</span>` : `${esc(L.remain)} ${yen(rest)}`}</span>
       </div>
-      <div class="progress" style="height:6px">
-        <div class="progress-bar ${over?'bg-danger':'bg-primary'}" style="width:${pct}%"></div>
-      </div>
+      <div class="progress" style="height:6px"><div class="progress-bar ${over ? 'bg-danger' : 'bg-primary'}" style="width:${p}%"></div></div>
     </div>`;
-  }).join('');
-  document.getElementById('budget-vs-actual').innerHTML = rows;
+  };
+  box.innerHTML = budgets.map(b => line(b.name, b.actual, b.amount, b.exceeded)).join('')
+    + '<hr class="border-secondary my-2">' + line('Σ', totals.actual, totals.budget, totals.exceeded);
 }
 
 loadStats();

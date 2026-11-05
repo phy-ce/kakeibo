@@ -1,0 +1,204 @@
+{# Monthly recurring rules (recurring.json): list card, add/edit modal, script.
+   Included by budget.html; needs `recurring_rules` and `rec_categories`. #}
+    <!-- Monthly recurring transactions: rules live in the personal recurring.json -->
+    <div class="card bg-dark border-secondary">
+      <div class="card-header border-secondary d-flex justify-content-between align-items-center">
+        <span>{{ t('settings.recurring') }}</span>
+        <button class="btn btn-sm btn-success" onclick="openRecModal()"><i class="bi bi-plus"></i> {{ t('common.add') }}</button>
+      </div>
+      <div class="card-body">
+        {% if recurring_rules %}
+        <table class="table table-dark table-sm table-hover small mb-2">
+          {% for r in recurring_rules %}
+          <tr class="{{ '' if r.ok and not r.paused else 'text-secondary' }}">
+            <td class="text-nowrap">{{ t('settings.recurring_day', day=r.day) }}</td>
+            <td>{{ r.label or r.id }}
+              {% if r.paused %}<span class="badge bg-secondary ms-1">{{ t('settings.recurring_paused') }}</span>
+              {% elif not r.ok %}<span class="badge bg-warning text-dark ms-1">{{ t('settings.recurring_invalid') }}</span>{% endif %}
+              {% if r.start or r.end %}<div class="text-secondary" style="font-size:0.7rem">{{ r.start }} ~ {{ r.end }}</div>{% endif %}
+            </td>
+            <td class="text-end text-nowrap {{ 'text-success' if (r.amount or 0)|float > 0 else 'text-danger' }}">
+              {{ "¥{:,.0f}".format(r.amount|float) if r.amount is number else r.amount }}</td>
+            <td class="text-nowrap text-end">
+              <button class="btn btn-link btn-sm p-0 text-secondary" title="{{ t('common.edit') }}"
+                      onclick="openRecModal({{ r.raw|tojson|forceescape }})"><i class="bi bi-pencil"></i></button>
+              <button class="btn btn-link btn-sm p-0 text-danger ms-1" title="{{ t('common.delete') }}"
+                      onclick="deleteRec({{ r.raw.id|tojson|forceescape }})"><i class="bi bi-trash"></i></button>
+            </td>
+          </tr>
+          {% endfor %}
+        </table>
+        {% else %}
+        <div class="small text-secondary mb-2">{{ t('settings.recurring_none') }}</div>
+        {% endif %}
+        <div class="text-secondary" style="font-size:0.75rem">
+          {{ t('settings.recurring_help') }}
+        </div>
+      </div>
+    </div>
+
+<!-- Monthly recurring rule add/edit modal (saved to recurring.json) -->
+<div class="modal fade" id="rec-modal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content bg-dark">
+      <div class="modal-header border-secondary">
+        <h5 class="modal-title" id="rec-title"></h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="r-id">
+        <div class="row g-2 mb-2">
+          <div class="col-4">
+            <label class="form-label small">{{ t('common.type') }}</label>
+            <select id="r-type" class="form-select form-select-sm bg-dark text-white border-secondary" onchange="recLoadMajor()">
+              <option value="수입">{{ cat_label('수입') }}</option><option value="지출">{{ cat_label('지출') }}</option>
+            </select>
+          </div>
+          <div class="col-4">
+            <label class="form-label small">{{ t('recurring.day') }}</label>
+            <div class="input-group input-group-sm">
+              <input type="number" id="r-day" min="1" max="31" class="form-control bg-dark text-white border-secondary" oninput="recSuggestStart()">
+              <span class="input-group-text">{{ t('recurring.day_suffix') }}</span>
+            </div>
+          </div>
+          <div class="col-4">
+            <label class="form-label small">{{ t('common.amount') }} (¥)</label>
+            <input type="number" id="r-amount" min="0" class="form-control form-control-sm bg-dark text-white border-secondary">
+          </div>
+        </div>
+        <div class="row g-2 mb-2">
+          <div class="col-4">
+            <label class="form-label small">{{ t('settings.major') }}</label>
+            <select id="r-major" class="form-select form-select-sm bg-dark text-white border-secondary" onchange="recLoadMinor()"></select>
+          </div>
+          <div class="col-4">
+            <label class="form-label small">{{ t('settings.minor') }}</label>
+            <select id="r-minor" class="form-select form-select-sm bg-dark text-white border-secondary" onchange="recLoadSub()"></select>
+          </div>
+          <div class="col-4">
+            <label class="form-label small">{{ t('common.category') }}</label>
+            <select id="r-sub" class="form-select form-select-sm bg-dark text-white border-secondary"></select>
+          </div>
+        </div>
+        <div class="row g-2 mb-2">
+          <div class="col-6">
+            <label class="form-label small">{{ t('common.shop') }}</label>
+            <input type="text" id="r-shop" class="form-control form-control-sm bg-dark text-white border-secondary">
+          </div>
+          <div class="col-6">
+            <label class="form-label small">{{ t('receipt.item_name') }}</label>
+            <input type="text" id="r-item" class="form-control form-control-sm bg-dark text-white border-secondary">
+          </div>
+        </div>
+        <div class="row g-2 mb-2">
+          <div class="col-6">
+            <label class="form-label small">{{ t('recurring.start') }}</label>
+            <input type="month" id="r-start" class="form-control form-control-sm bg-dark text-white border-secondary" oninput="this.dataset.touched='1'; recHint()">
+          </div>
+          <div class="col-6">
+            <label class="form-label small">{{ t('recurring.end') }}</label>
+            <input type="month" id="r-end" class="form-control form-control-sm bg-dark text-white border-secondary">
+          </div>
+        </div>
+        <div class="form-check form-switch mb-2">
+          <input class="form-check-input" type="checkbox" id="r-enabled">
+          <label class="form-check-label small" for="r-enabled">{{ t('recurring.enabled') }}</label>
+        </div>
+        <div id="r-hint" class="small text-warning" style="display:none">
+          <i class="bi bi-info-circle"></i> {{ t('recurring.posts_now') }}
+        </div>
+      </div>
+      <div class="modal-footer border-secondary">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">{{ t('common.cancel') }}</button>
+        <button class="btn btn-primary btn-sm" onclick="saveRec()">{{ t('common.save') }}</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const REC_CATS = {{ rec_categories|tojson }};
+const recUniq = arr => [...new Set(arr.filter(v => v))];
+const recEsc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const recV = id => document.getElementById(id).value.trim();
+
+// ── monthly recurring rules ──
+function recFill(id, values, cur, blank) {
+  const sel = document.getElementById(id);
+  const vals = recUniq(values);
+  if (cur && !vals.includes(cur)) vals.unshift(cur);   // keep an off-scheme value selectable
+  sel.innerHTML = (blank ? '<option value=""></option>' : '') +
+    vals.map(v => `<option value="${recEsc(v)}">${recEsc(catLabel(v))}</option>`).join('');
+  sel.value = cur || (blank ? '' : (vals[0] || ''));
+}
+function recLoadMajor(major, minor, sub) {
+  const type = recV('r-type');
+  recFill('r-major', REC_CATS.filter(c => c.type === type).map(c => c.major), major);
+  recLoadMinor(minor, sub);
+}
+function recLoadMinor(minor, sub) {
+  const type = recV('r-type'), major = recV('r-major');
+  recFill('r-minor', REC_CATS.filter(c => c.type === type && c.major === major).map(c => c.minor), minor, true);
+  recLoadSub(sub);
+}
+function recLoadSub(sub) {
+  const type = recV('r-type'), major = recV('r-major'), minor = recV('r-minor');
+  recFill('r-sub', REC_CATS.filter(c => c.type === type && c.major === major && c.minor === minor).map(c => c.sub), sub, true);
+}
+
+const pad2 = n => String(n).padStart(2, '0');
+// New rule: start this month if its day is still ahead, else next month
+function recSuggestStart() {
+  const start = document.getElementById('r-start');
+  if (start.dataset.touched || recV('r-id')) { recHint(); return; }
+  const now = new Date(), day = parseInt(recV('r-day')) || 1;
+  const d = day >= now.getDate() ? now : new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  start.value = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+  recHint();
+}
+// Warn when saving will post this month's (already due) entry right away
+function recHint() {
+  const now = new Date(), ym = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}`;
+  const start = recV('r-start'), day = parseInt(recV('r-day')) || 1;
+  const due = !recV('r-id') && start && (start < ym || (start === ym && day <= now.getDate()));
+  document.getElementById('r-hint').style.display = due ? '' : 'none';
+}
+
+function openRecModal(r) {
+  r = r || {};
+  document.getElementById('rec-title').textContent = r.id ? {{ t('recurring.edit')|tojson }} : {{ t('recurring.add')|tojson }};
+  document.getElementById('r-id').value = r.id || '';
+  document.getElementById('r-type').value = r.type || '수입';
+  document.getElementById('r-day').value = r.day || 10;
+  document.getElementById('r-amount').value = r.amount || '';
+  document.getElementById('r-shop').value = r.shop || '';
+  document.getElementById('r-item').value = r.item || '';
+  const start = document.getElementById('r-start');
+  start.value = r.start || ''; delete start.dataset.touched;
+  document.getElementById('r-end').value = r.end || '';
+  document.getElementById('r-enabled').checked = r.enabled !== false;
+  recLoadMajor(r.major, r.minor, r.sub);
+  recSuggestStart();
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('rec-modal')).show();
+}
+
+function saveRec() {
+  const body = {
+    id: recV('r-id'), type: recV('r-type'),
+    day: parseInt(recV('r-day')) || 1, amount: Math.abs(parseFloat(recV('r-amount')) || 0),
+    major: recV('r-major'), minor: recV('r-minor'), sub: recV('r-sub'),
+    shop: recV('r-shop'), item: recV('r-item'),
+    start: recV('r-start'), end: recV('r-end'),
+    enabled: document.getElementById('r-enabled').checked,
+  };
+  if (!body.amount) { alert({{ t('recurring.err_invalid')|tojson }}); return; }
+  fetch('/api/recurring', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)})
+    .then(r => r.json())
+    .then(d => { if (d.ok) location.reload(); else alert(d.error); });
+}
+
+function deleteRec(id) {
+  if (!confirm({{ t('recurring.confirm_delete')|tojson }})) return;
+  fetch(`/api/recurring/${encodeURIComponent(id)}`, {method: 'DELETE'}).then(() => location.reload());
+}
+</script>

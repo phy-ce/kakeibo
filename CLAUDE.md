@@ -18,7 +18,7 @@ pip install -r requirements.txt
 
 **The project folder holds code (the engine) only.** All real data and secrets are stored in the user home **`~/.kakeibo/`** (Windows `%USERPROFILE%\.kakeibo\`). The location can be overridden with env `KAKEIBO_HOME`.
 
-Inside `~/.kakeibo/`: `kakeibo.db`, `.env` (GEMINI_API_KEY, FLASK_SECRET_KEY, optional GOOGLE_CLIENT_ID/SECRET), `credentials.json`/`token.json` (Gmail), `uploads/receipts/` (receipt images), `temp/` (in-progress temp), `categories.json`/`auto_rules.json` (optional).
+Inside `~/.kakeibo/`: `kakeibo.db`, `.env` (GEMINI_API_KEY, FLASK_SECRET_KEY, optional GOOGLE_CLIENT_ID/SECRET), `credentials.json`/`token.json` (Gmail), `uploads/receipts/` (receipt images), `temp/` (in-progress temp), `categories.json`/`auto_rules.json`/`recurring.json` (optional).
 
 - Path helpers: `config.user_config_dir()`, `config.user_path(name)`, `config.resolve_secret_file(name)` (user home first, project root as fallback).
 - `config.migrate_project_data()` — moves data an older version created in the project folder to `~/.kakeibo` once (called at the start of `init_db()`).
@@ -63,7 +63,13 @@ Both review pages (`receipt_review.html`, `email_review.html`) share one row lay
 
 **Shop / item autocomplete** (`static/js/suggest.js`, loaded by `base.html`): `attachSuggest(input, 'shop'|'item', {shopOf, onPick})` fills a native `<datalist>` from `GET /api/suggest?field=&q=&shop=` (past values containing `q`, most used first; for items the given shop's come first, and each item carries its latest `type/major/minor/sub/amount`). Used in the add/edit dialog (a picked item fills the category and last amount **only where still empty**) and on both review pages (`attachReviewSuggest()`, attached on first focus; fills an unset category only).
 
-The transaction list (`transactions.html`) groups rows by `receipt_id` (fallback: date+shop) via `_receipt_units()` into **collapsible groups**. Images zoom on click via the lightbox (`showReceipt` in base.html).
+Each review row also has a memo (`.field-note` → `note`; mail rows are pre-filled with the AI's full title), and each card header has a shop box (`reviewShopAll()` in `review.js`) that overwrites the shop of every row in that card.
+
+The transaction list (`transactions.html`) groups rows by `receipt_id` (fallback: date+shop) via `_receipt_units()` into **collapsible groups**. Header clicks sort by date/type/minor/shop/jpy (`?sort=&dir=`, `_sort_units()`; remembered in `settings.tx_sort`). Months always stay newest first; the sort orders units within a month and items within a group (sorting by minor unfolds receipt groups so each item sits under its own minor). A group's balance comes from `u['last']` (ledger-last row), not `rows[-1]`, because the rows may be re-sorted. A receipt_id whose rows span several dates (a PASMO history screenshot) is not a purchase, so `_receipt_units()` shows its rows as singles instead of one collapsed group. Images zoom on click via the lightbox (`showReceipt` in base.html).
+
+**Stats** (`/stats`, `GET /api/stats?year=&month=`): one month plus the 12 months up to it. Rows count as expense/income by their **major's category type** (fallback: row type), so a refund filed `수입` under an expense category lowers spend and an income category counts as income whatever the row type. Budget actuals come from `_budget_report()`, shared with `/budget`.
+
+**PASMO**: transport is entered by uploading a mobile PASMO history screenshot as a receipt (`PASMO_URL` Jinja global; the weekend transport banner links there). `ai_items.clean_items()` drops positive top-up rows (`_TOPUP_RE`: チャージ etc.) - a top-up only moves money onto the card, the rides are the expense.
 
 ## Generic mail sync (sync/generic.py)
 
@@ -88,6 +94,7 @@ Flow is **3-step with a review page** (mirrors receipts), so the user confirms w
 - Gemini model is user-selectable in settings (`gemini_model`, `gemini.get_model_id()` read at call time); default `gemini.DEFAULT_MODEL`.
 - **Auto model mode** (`gemini_auto_model`, asked as a checkbox in the mail-sync modal before the run starts and persisted by `POST /api/email/sync`): `_model_chain()` becomes chosen -> fallback -> the rest of `AVAILABLE_MODELS` in order, and quota/busy/retired failures move to the next model instead of stopping. `_cooldown` parks a failed model (RPM 70s, per-day 6h, busy 120s, 404 24h) so later calls in the same batch do not re-probe it; a successful call clears it. `gemini.LAST_MODEL` holds the model that answered, and the sync emits a `model_switch` progress event when it changes.
 - **Nothing is lost when a page closes.** The transactions page shows banners from `_running_job('mail')` ("진행 보기" reopens the sync modal via `showMailProgress` -> `followMailJob`) and `_pending_sessions()`, which scans `~/.kakeibo/temp/*.json` for unconfirmed mail results / receipt results / staged photos (survives restarts). `POST /api/sessions/<sid>/discard` removes one; discarded mails are marked `reviewed` in `mail_seen` so they are not analyzed again. Reopening `/receipt-stage/<sid>` while its job runs reattaches (`RUNNING_JOB`); analyzed photos show as done and cannot be reselected. (Jinja gotcha: never name a dict key `items`/`keys`/`values` - `p.items` resolves to the dict method.)
+- **Mail receipt view**: `generic.price_excerpt()` keeps only the lines around prices (`_PRICE_LINE_RE`, 3 above / 1 below, gaps as `...`). It is staged as `excerpt` and saved to the `mail_excerpt` table on confirm; the ledger shows an envelope icon on mail rows that opens it receipt-style (`GET /api/mail-excerpt/<gmail_id>`, which fetches + caches from Gmail for mails imported before this existed).
 - The review page shows each mail's **original text** (`email.body`, trimmed to `generic.BODY_PREVIEW_CHARS`, staged in the session JSON) behind an "원본 메일" button, so the AI's reading can be checked before adding — the mail-side equivalent of opening the receipt photo.
 - When a run stops early, `collect_generic()` reports `total` / `examined` / `remaining` plus `remaining_samples` (subjects of up to `REMAINING_PREVIEW` unprocessed mails, read with `format="metadata"` so no AI quota is used). The review-page banners and the stop messages state these numbers instead of a vague "partly analyzed".
 
@@ -120,6 +127,10 @@ Receipt OCR and mail parsing both call Gemini with a **response schema** (`gemin
 ## AI dates (`kakeibo/dates.py`)
 
 Receipts/mails older than `MIN_YEAR` (2025) are never entered, so a year that is missing, unparsable or older than that is treated as a misread: `normalize_date()` replaces it with the current year (previous year only if the result would be more than 15 days in the future). Applied to OCR output in `/api/receipts/analyze` and to AI mail output in `parse_email_ai()`. At confirm time it runs with `fix_year=False`, so a year the user typed on the review page is kept and only a blank/broken date is filled in. The Gemini prompts also state today's date and the `MIN_YEAR` floor.
+
+## Monthly recurring transactions (`kakeibo/recurring.py`)
+
+Rules (allowance, rent, ...) are personal data in `~/.kakeibo/recurring.json` (format in the module docstring: `id`, `type`, `day`, `amount` positive, category/shop/item, `start`/`end` 'YYYY-MM', `enabled`). `post_due()` inserts each due month as `source='recurring'` and records it in `recurring_log(rule_id, ym)`; the log decides, so a posted row the user deletes is not recreated, and a missed month is caught up on the next run. Called at startup and on every `/transactions` load. Never rename a rule `id` (it would re-post every month since `start`). The budget page's `매월 자동 입력` tab (`templates/_recurring.html`, included by `budget.html`; `/budget#recurring` opens it) adds/edits/pauses/deletes rules through a dialog (`POST /api/recurring`, `DELETE /api/recurring/<id>` -> `recurring.upsert()/delete()`, which rewrite the JSON and keep unknown keys such as `_comment`); new rules get a random `id`.
 
 ## Housekeeping (runs once at startup, from `__main__.main()`)
 

@@ -25,6 +25,11 @@ _GENERIC_ITEMS = {'送料', '配送料', '手数料', '消費税', '値引', '�
                   'ポイント', '小計', '合計', 'shipping', 'tax', 'discount', 'fee',
                   '(세부내역 없음)'}
 
+# IC card / wallet top-ups (PASMO history shows them as "+3,000 チャージ"). Money only
+# moves into the card; the rides paid from it are the expenses, so a top-up is
+# neither income nor spend. Matched on the NFKC key, so half-width ﾁｬｰｼﾞ is caught.
+_TOPUP_RE = re.compile(r'チャージ|充電|충전|topup|top-up|recharge|autocharge')
+
 
 def _to_int(v):
     """'¥1,200' / '-1200.0' / 1200 -> int, else None."""
@@ -64,6 +69,8 @@ def clean_items(data, *, fallback_date='', default_shop='', fix_year=True) -> li
         if not name:
             continue
         typ = str(d.get('type') or '').strip()
+        if (amount > 0 or typ == INCOME) and _is_topup(name, d.get('shop')):
+            continue
         if typ not in (EXPENSE, INCOME):
             typ = INCOME if amount > 0 and not has_expense else EXPENSE
         note = str(d.get('note') or '').strip()
@@ -95,6 +102,10 @@ def _key(s) -> str:
     """Match key: NFKC (full-width -> half-width), case- and space-insensitive."""
     s = unicodedata.normalize('NFKC', str(s or '')).lower()
     return re.sub(r'\s+', '', s)
+
+
+def _is_topup(name, shop) -> bool:
+    return bool(_TOPUP_RE.search(_key(name)) or _TOPUP_RE.search(_key(shop)))
 
 
 _GENERIC_KEYS = {_key(g) for g in _GENERIC_ITEMS}
